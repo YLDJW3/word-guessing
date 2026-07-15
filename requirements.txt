@@ -1,0 +1,7 @@
+# Core: word2vec-format loading + vectorized cosine/ranking.
+gensim>=4.3.0
+numpy>=1.24
+
+# Optional: traditional -> simplified normalization so 「愛」 matches 「爱」.
+# Pure-Python, no system deps. Comment out if you don't need it.
+opencc-python-reimplemented>=0.1.7

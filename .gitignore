@@ -1,0 +1,9 @@
+# Vector data (multi-GB, downloaded separately)
+data/
+*.kv
+*.kv.vectors.npy
+
+# Python
+.venv/
+__pycache__/
+*.pyc
