@@ -52,7 +52,6 @@ def load_vectors(path: str, limit: int):
         print("或使用 --vectors 指定正确路径。")
         sys.exit(1)
 
-    # Use cached native format if available (loads in ~1-2s vs 30-90s).
     cache_path = path + f".limit{limit}.kv"
     if os.path.isfile(cache_path):
         print(f"正在加载缓存 (Loading cache: {cache_path}) ...")
@@ -78,7 +77,6 @@ def load_vectors(path: str, limit: int):
 
 
 def precompute_ranks(kv: KeyedVectors, secret: str):
-    """Compute cosine similarity of secret vs all words; return sorted rank mapping."""
     print("正在计算相似度排名 (Precomputing ranks) ...")
     t0 = time.time()
     secret_vec = kv.get_vector(secret, norm=True)
@@ -132,32 +130,13 @@ def print_history(history: list):
     print()
 
 
-def main():
-    args = parse_args()
-
-    if args.seed is not None:
-        random.seed(args.seed)
-
-    kv = load_vectors(args.vectors, args.limit)
-
-    if args.answer:
-        secret = to_simplified(args.answer.strip())
-        if secret not in kv:
-            print(f"错误: 答案 '{secret}' 不在词表中。请换一个词。")
-            sys.exit(1)
-    else:
-        valid_candidates = [w for w in CANDIDATE_WORDS if w in kv]
-        if not valid_candidates:
-            print("错误: 候选词列表中没有词在词表里。请检查向量文件。")
-            sys.exit(1)
-        secret = random.choice(valid_candidates)
-
+def play_round(kv: KeyedVectors, secret: str):
+    """Play one round of the guessing game. Returns when round ends."""
     rank_map = precompute_ranks(kv, secret)
     total = len(rank_map)
 
-    print("\n" + "=" * 60)
-    print("  🎯 中文猜词游戏 (Chinese Word Guessing Game)")
-    print("=" * 60)
+    print()
+    print("  " + "-" * 40)
     print(f"  词表大小: {total} 词")
     print(f"  答案已设定。开始猜吧！")
     print()
@@ -165,8 +144,8 @@ def main():
     print("    :hint  - 显示一个提示 (接近答案的词)")
     print("    :top   - 显示当前最接近的猜测")
     print("    :give  - 放弃 (显示答案)")
-    print("    :quit  - 退出游戏")
-    print("=" * 60)
+    print("    :quit  - 返回主菜单")
+    print("  " + "-" * 40)
     print()
 
     history = []
@@ -177,21 +156,20 @@ def main():
         try:
             raw = input("猜一个词> ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\n再见！")
-            break
+            print()
+            return
 
         if not raw:
             continue
 
         if raw == ":quit":
             print(f"  答案是: {secret}")
-            print("  再见！")
-            break
+            return
 
         if raw == ":give":
             print(f"\n  🎯 答案是: {secret}")
             print(f"  你一共猜了 {guess_count} 次。")
-            break
+            return
 
         if raw == ":hint":
             hint_rank = max(1, min(len(history) * 2 + 10, 50))
@@ -231,7 +209,78 @@ def main():
             print(f"  答案: {secret}")
             print(f"  总共猜了 {guess_count} 次")
             print()
-            break
+            return
+
+
+def show_menu():
+    print()
+    print("=" * 60)
+    print("  🎯 中文猜词游戏 (Chinese Word Guessing Game)")
+    print("=" * 60)
+    print("  [1] 随机猜词 (Random word)")
+    print("  [2] 自定义猜词 (Custom word)")
+    print("  [3] 退出 (Exit)")
+    print("=" * 60)
+
+
+def main_menu(kv: KeyedVectors, valid_candidates: list):
+    """Main menu loop. Blocks on input() when idle — no CPU usage."""
+    while True:
+        show_menu()
+        try:
+            choice = input("\n请选择> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n再见！")
+            return
+
+        if choice == "1":
+            secret = random.choice(valid_candidates)
+            play_round(kv, secret)
+
+        elif choice == "2":
+            try:
+                raw = input("请输入答案词> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                continue
+            if not raw:
+                continue
+            word = to_simplified(raw)
+            if word not in kv:
+                print(f"  ⚠️  「{raw}」不在词表中，请换一个词。")
+                continue
+            play_round(kv, word)
+
+        elif choice == "3":
+            print("  再见！")
+            return
+
+        else:
+            print("  请输入 1、2 或 3。")
+
+
+def main():
+    args = parse_args()
+
+    if args.seed is not None:
+        random.seed(args.seed)
+
+    kv = load_vectors(args.vectors, args.limit)
+
+    valid_candidates = [w for w in CANDIDATE_WORDS if w in kv]
+    if not valid_candidates:
+        print("错误: 候选词列表中没有词在词表里。请检查向量文件。")
+        sys.exit(1)
+
+    # If --answer is given, play one round directly then go to menu.
+    if args.answer:
+        secret = to_simplified(args.answer.strip())
+        if secret not in kv:
+            print(f"错误: 答案 '{secret}' 不在词表中。请换一个词。")
+            sys.exit(1)
+        play_round(kv, secret)
+
+    main_menu(kv, valid_candidates)
 
 
 if __name__ == "__main__":
