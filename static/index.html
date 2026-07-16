@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Semantle</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #1a1a2e;
+    color: #eee;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+}
+h1 { font-size: 1.8rem; margin-bottom: 20px; text-align: center; }
+.container { width: 100%; max-width: 600px; }
+.card {
+    background: #16213e;
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 16px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+input, select, button {
+    font-size: 1rem;
+    padding: 10px 16px;
+    border-radius: 8px;
+    border: 1px solid #333;
+    outline: none;
+}
+input, select {
+    background: #0f3460;
+    color: #eee;
+    width: 100%;
+    margin-bottom: 12px;
+}
+input:focus { border-color: #e94560; }
+button {
+    background: #e94560;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+button:hover { background: #c73e54; }
+button:disabled { background: #555; cursor: not-allowed; }
+.btn-secondary { background: #0f3460; }
+.btn-secondary:hover { background: #1a4a7a; }
+.row { display: flex; gap: 10px; margin-bottom: 12px; }
+.row > * { flex: 1; }
+.hidden { display: none !important; }
+.players-list { font-size: 0.9rem; color: #aaa; margin-bottom: 8px; }
+.room-info { font-size: 0.85rem; color: #888; margin-bottom: 16px; }
+.guess-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    margin-top: 12px;
+}
+.guess-table th, .guess-table td {
+    padding: 6px 8px;
+    text-align: left;
+    border-bottom: 1px solid #2a2a4a;
+}
+.guess-table th { color: #888; font-weight: 500; }
+.guess-table tr.hot { color: #ff6b6b; }
+.guess-table tr.warm { color: #ffa502; }
+.guess-table tr.cold { color: #74b9ff; }
+.guess-table tr.latest {
+    background: #2a2a4a;
+    font-weight: 700;
+    border-bottom: 2px solid #e94560;
+}
+.scoreboard { margin-top: 16px; }
+.scoreboard h3 { font-size: 1rem; margin-bottom: 8px; color: #aaa; }
+.score-item {
+    display: flex; justify-content: space-between;
+    padding: 4px 0; font-size: 0.9rem;
+    border-bottom: 1px solid #2a2a4a;
+}
+.toast {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+    background: #e94560; color: #fff; padding: 12px 24px;
+    border-radius: 8px; font-weight: 600; z-index: 1000;
+    animation: fadeIn 0.3s;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateX(-50%) translateY(-10px); } }
+.win-banner {
+    text-align: center; padding: 20px;
+    background: linear-gradient(135deg, #e94560, #533483);
+    border-radius: 12px; margin-bottom: 16px;
+}
+.win-banner h2 { font-size: 1.5rem; margin-bottom: 8px; }
+.room-list-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px; border-bottom: 1px solid #2a2a4a;
+}
+.room-list-item button { padding: 6px 14px; font-size: 0.85rem; }
+.mode-tag {
+    font-size: 0.75rem; padding: 2px 8px; border-radius: 4px;
+    background: #0f3460; margin-left: 8px;
+}
+.user-badge {
+    position: fixed; top: 16px; right: 16px; z-index: 1000;
+    background: #0f3460; color: #eee; padding: 6px 14px;
+    border-radius: 20px; font-size: 0.9rem; font-weight: 600;
+    border: 1px solid #e94560;
+}
+</style>
+</head>
+<body>
+
+<div id="user-badge" class="user-badge hidden"></div>
+
+<div class="container">
+<h1>🎯 Semantle</h1>
+
+<!-- Screen: Set Name -->
+<div id="screen-name" class="card">
+    <h2 style="margin-bottom:16px">设置昵称</h2>
+    <input id="input-name" type="text" placeholder="输入你的昵称..." maxlength="20" autofocus>
+    <button id="btn-set-name" onclick="setName()">确定</button>
+</div>
+
+<!-- Screen: Lobby -->
+<div id="screen-lobby" class="card hidden">
+    <h2 style="margin-bottom:16px">游戏大厅</h2>
+    <p class="players-list" id="lobby-name"></p>
+
+    <div class="row">
+        <button onclick="showCreate()">创建房间</button>
+        <button class="btn-secondary" onclick="refreshRooms()">刷新房间列表</button>
+    </div>
+
+    <div id="room-list"></div>
+
+    <div style="margin-top:16px">
+        <input id="input-room-id" type="text" placeholder="输入房间号加入..." maxlength="4" style="text-transform:uppercase">
+        <button onclick="joinRoom()">加入房间</button>
+    </div>
+</div>
+
+<!-- Screen: Create Room -->
+<div id="screen-create" class="card hidden">
+    <h2 style="margin-bottom:16px">创建房间</h2>
+    <label style="font-size:0.9rem;color:#aaa">游戏模式</label>
+    <select id="select-mode">
+        <option value="competitive">竞争模式 (各猜各的，比谁快)</option>
+        <option value="cooperative">合作模式 (共享猜测，一起猜)</option>
+    </select>
+    <label style="font-size:0.9rem;color:#aaa">答案 (留空=系统随机)</label>
+    <input id="input-secret" type="text" placeholder="自定义答案词 (可选)">
+    <div class="row">
+        <button onclick="createRoom()">创建</button>
+        <button class="btn-secondary" onclick="showLobby()">返回</button>
+    </div>
+</div>
+
+<!-- Screen: Game -->
+<div id="screen-game" class="card hidden">
+    <div id="win-banner" class="win-banner hidden"></div>
+    <div id="game-header">
+        <p class="room-info" id="game-info"></p>
+        <p class="players-list" id="game-players"></p>
+    </div>
+    <div id="game-input-area">
+        <div class="row">
+            <input id="input-guess" type="text" placeholder="输入你的猜测..." style="margin-bottom:0">
+            <button onclick="sendGuess()" style="flex:none;width:80px">猜</button>
+        </div>
+        <div class="row">
+            <button id="btn-hint" class="btn-secondary" onclick="sendHint()" style="font-size:0.85rem" disabled>💡 提示</button>
+            <button class="btn-secondary" onclick="leaveRoom()" style="font-size:0.85rem">退出房间</button>
+        </div>
+    </div>
+    <div id="game-results">
+        <table class="guess-table">
+            <thead><tr><th>#</th><th>词</th><th>相似度</th><th>排名</th><th></th></tr></thead>
+            <tbody id="guess-tbody"></tbody>
+        </table>
+    </div>
+    <div id="scoreboard-area" class="scoreboard hidden">
+        <h3>🏆 排行榜</h3>
+        <div id="scoreboard-list"></div>
+    </div>
+</div>
+
+</div>
+
+<script>
+let ws = null;
+let playerName = "";
+let currentRoom = null;
+let gameMode = "";
+let guessCount = 0;
+let guessHistory = [];
+let latestGuess = null;
+
+function connect() {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    ws = new WebSocket(`${proto}//${location.host}/ws`);
+    ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
+    ws.onclose = () => setTimeout(connect, 2000);
+}
+
+function send(data) {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
+}
+
+function show(id) {
+    document.querySelectorAll(".card").forEach(el => el.classList.add("hidden"));
+    document.getElementById(id).classList.remove("hidden");
+}
+
+function showToast(msg) {
+    const t = document.createElement("div");
+    t.className = "toast";
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3000);
+}
+
+// --- Name ---
+function setName() {
+    const name = document.getElementById("input-name").value.trim();
+    if (!name) return;
+    send({type: "set_name", name});
+}
+document.getElementById("input-name").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") setName();
+});
+
+// --- Lobby ---
+function showLobby() { show("screen-lobby"); refreshRooms(); }
+function showCreate() { show("screen-create"); }
+
+function refreshRooms() {
+    fetch("/api/rooms").then(r => r.json()).then(rooms => {
+        const list = document.getElementById("room-list");
+        if (!rooms.length) {
+            list.innerHTML = '<p style="color:#666;font-size:0.9rem;padding:10px 0">暂无房间</p>';
+            return;
+        }
+        list.innerHTML = rooms.filter(r => !r.finished).map(r => `
+            <div class="room-list-item">
+                <span>${r.room_id} <span class="mode-tag">${r.mode === "cooperative" ? "合作" : "竞争"}</span>
+                    — ${r.player_count}人 (${r.host})</span>
+                <button onclick="joinRoomById('${r.room_id}')">加入</button>
+            </div>
+        `).join("");
+    });
+}
+
+function joinRoom() {
+    const id = document.getElementById("input-room-id").value.trim().toUpperCase();
+    if (!id) return;
+    send({type: "join_room", room_id: id});
+}
+function joinRoomById(id) { send({type: "join_room", room_id: id}); }
+
+document.getElementById("input-room-id").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") joinRoom();
+});
+
+// --- Create Room ---
+function createRoom() {
+    const mode = document.getElementById("select-mode").value;
+    const secret = document.getElementById("input-secret").value.trim();
+    send({type: "create_room", mode, secret});
+}
+
+// --- Game ---
+function sendGuess() {
+    const input = document.getElementById("input-guess");
+    const word = input.value.trim();
+    if (!word) return;
+    send({type: "guess", word});
+    input.value = "";
+}
+document.getElementById("input-guess").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendGuess();
+});
+
+function sendHint() { send({type: "hint"}); }
+
+function updateHintButton(available, nextIn) {
+    const btn = document.getElementById("btn-hint");
+    btn.disabled = !available;
+    btn.textContent = available ? "💡 提示 (可用)" : `💡 提示 (还需${nextIn}次)`;
+}
+
+function leaveRoom() {
+    send({type: "leave_room"});
+    currentRoom = null;
+    guessCount = 0;
+    guessHistory = [];
+    latestGuess = null;
+    document.getElementById("guess-tbody").innerHTML = "";
+    document.getElementById("win-banner").classList.add("hidden");
+    document.getElementById("scoreboard-area").classList.add("hidden");
+    showLobby();
+}
+
+function addGuessRow(result) {
+    guessHistory.push(result);
+    latestGuess = result;
+    renderGuessTable();
+}
+
+function guessRow(r, num, extraClass = "") {
+    const cls = r.rank <= 100 ? "hot" : r.rank <= 1000 ? "warm" : "cold";
+    const playerCol = gameMode === "cooperative" ? `<td>${r.player}</td>` : "";
+    return `<tr class="${cls} ${extraClass}"><td>${num}</td>${playerCol}<td>${r.word}</td>
+        <td>${r.similarity}%</td><td>第${r.rank}近</td><td>${r.temperature}</td></tr>`;
+}
+
+function renderGuessTable() {
+    const tbody = document.getElementById("guess-tbody");
+    const sorted = [...guessHistory].sort((a, b) => b.similarity - a.similarity);
+    let html = "";
+    // Extra pinned row on top for the most recent guess.
+    if (latestGuess) {
+        html += guessRow(latestGuess, "⬇", "latest");
+    }
+    html += sorted.map((r, i) => guessRow(r, i + 1)).join("");
+    tbody.innerHTML = html;
+}
+
+function updateScoreboard(scoreboard) {
+    const area = document.getElementById("scoreboard-area");
+    const list = document.getElementById("scoreboard-list");
+    area.classList.remove("hidden");
+    list.innerHTML = scoreboard.map((s, i) => `
+        <div class="score-item">
+            <span>${i+1}. ${s.name}</span>
+            <span>最高相似度: ${s.best_similarity}% (第${s.best_rank}近, ${s.guess_count}次)</span>
+        </div>
+    `).join("");
+}
+
+// --- Message Handler ---
+function handleMessage(msg) {
+    switch (msg.type) {
+        case "name_set":
+            playerName = msg.name;
+            document.getElementById("lobby-name").textContent = `👤 ${playerName}`;
+            const badge = document.getElementById("user-badge");
+            badge.textContent = `👤 ${playerName}`;
+            badge.classList.remove("hidden");
+            showLobby();
+            break;
+
+        case "room_joined":
+            currentRoom = msg.room_id;
+            gameMode = msg.mode;
+            guessCount = 0;
+            guessHistory = [];
+            latestGuess = null;
+            document.getElementById("guess-tbody").innerHTML = "";
+            document.getElementById("scoreboard-list").innerHTML = "";
+            document.getElementById("scoreboard-area").classList.add("hidden");
+            document.getElementById("win-banner").classList.add("hidden");
+            document.getElementById("game-input-area").classList.remove("hidden");
+            document.getElementById("game-info").textContent =
+                `房间: ${msg.room_id} | 模式: ${msg.mode === "cooperative" ? "合作" : "竞争"} | 词表: ${msg.total_words}词`;
+            document.getElementById("game-players").textContent = `玩家: ${msg.players.join(", ")}`;
+            // Update table header for cooperative mode
+            const thead = document.querySelector(".guess-table thead tr");
+            if (msg.mode === "cooperative") {
+                thead.innerHTML = "<th>#</th><th>玩家</th><th>词</th><th>相似度</th><th>排名</th><th></th>";
+            } else {
+                thead.innerHTML = "<th>#</th><th>词</th><th>相似度</th><th>排名</th><th></th>";
+                document.getElementById("scoreboard-area").classList.remove("hidden");
+            }
+            // Load history for cooperative late-joiners
+            if (msg.history) msg.history.forEach(r => addGuessRow(r));
+            show("screen-game");
+            document.getElementById("input-guess").focus();
+            break;
+
+        case "guess_result":
+            addGuessRow(msg);
+            break;
+
+        case "scoreboard":
+            updateScoreboard(msg.scoreboard);
+            break;
+
+        case "hint_status":
+            updateHintButton(msg.available, msg.next_in);
+            break;
+
+        case "hint": {
+            const who = gameMode === "cooperative" && msg.requested_by
+                ? `${msg.requested_by} 的提示` : "提示";
+            showToast(`💡 ${who}：「${msg.word}」(相似度 ${msg.similarity}%, 第${msg.rank}近)`);
+            break;
+        }
+
+        case "hint_unavailable":
+            showToast(msg.message);
+            break;
+
+        case "already_guessed":
+            showToast(`已猜过「${msg.word}」(${msg.similarity}%, 第${msg.rank}近)`);
+            break;
+
+        case "not_in_vocab":
+            showToast(`「${msg.word}」不在词表中`);
+            break;
+
+
+        case "game_won": {
+            const banner = document.getElementById("win-banner");
+            banner.classList.remove("hidden");
+            banner.innerHTML = `<h2>🎉 ${msg.winner} 猜对了！</h2>
+                <p>答案: ${msg.word} | 用了 ${msg.guesses} 次</p>
+                <button onclick="leaveRoom()" style="margin-top:12px">返回大厅</button>`;
+            document.getElementById("game-input-area").classList.add("hidden");
+            break;
+        }
+
+        case "player_joined":
+            document.getElementById("game-players").textContent = `玩家: ${msg.players.join(", ")}`;
+            showToast(`${msg.name} 加入了房间`);
+            break;
+
+        case "player_left":
+            document.getElementById("game-players").textContent = `玩家: ${msg.players.join(", ")}`;
+            break;
+
+        case "left_room":
+            break;
+
+        case "error":
+            showToast(msg.message);
+            break;
+    }
+}
+
+// Init
+connect();
+</script>
+</body>
+</html>

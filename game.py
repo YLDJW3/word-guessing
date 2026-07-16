@@ -14,6 +14,8 @@ import time
 import numpy as np
 from gensim.models import KeyedVectors
 
+from config import DEFAULT_VECTORS_PATH, DEFAULT_LIMIT
+from engine import temperature_indicator
 from words import CANDIDATE_WORDS
 
 try:
@@ -30,13 +32,13 @@ def parse_args():
     p = argparse.ArgumentParser(description="中文猜词游戏 — Chinese Word Guessing Game")
     p.add_argument(
         "--vectors",
-        default="data/sgns.merge.word",
+        default=DEFAULT_VECTORS_PATH,
         help="Path to the word2vec-format vectors file.",
     )
     p.add_argument(
         "--limit",
         type=int,
-        default=1_000_000,
+        default=DEFAULT_LIMIT,
         help="Max number of vectors to load (file is freq-sorted; default 1M).",
     )
     p.add_argument("--answer", default=None, help="Set the secret word manually.")
@@ -89,23 +91,6 @@ def precompute_ranks(kv: KeyedVectors, secret: str):
     elapsed = time.time() - t0
     print(f"排名计算完成, 耗时 {elapsed:.1f}s")
     return rank_map
-
-
-def temperature_indicator(rank: int) -> str:
-    if rank <= 10:
-        return "🔥🔥🔥"
-    elif rank <= 100:
-        return "🔥🔥"
-    elif rank <= 1000:
-        return "🔥"
-    elif rank <= 5000:
-        return "♨️"
-    elif rank <= 10000:
-        return "🌤️"
-    elif rank <= 50000:
-        return "🌥️"
-    else:
-        return "❄️"
 
 
 def print_guess_result(word: str, similarity: float, rank: int, total: int, guess_num: int):
