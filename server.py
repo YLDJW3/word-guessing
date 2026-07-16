@@ -19,7 +19,7 @@ import uvicorn
 import stats
 from config import (
     DEFAULT_VECTORS_PATH, DEFAULT_LIMIT, DEFAULT_HOST, DEFAULT_PORT,
-    ROOM_ID_LENGTH, MAX_NAME_LENGTH,
+    ROOM_ID_LENGTH, MAX_NAME_LENGTH, ROOM_GRACE_SECONDS,
     HINT_INTERVAL, HINT_CAP_DELTA, MIN_HINT_RANK,
     STATS_DB_PATH,
 )
@@ -61,6 +61,7 @@ class Room:
     shared_guesses: list = field(default_factory=list)
     winner: str | None = None
     created_at: float = field(default_factory=time.time)
+    empty_since: float | None = None  # set when last player leaves; None while occupied
     # Hint tracking. Milestone = how many HINT_INTERVAL blocks have been consumed.
     hint_used_milestone: dict[str, int] = field(default_factory=dict)  # competitive, per player
     coop_hint_used_milestone: int = 0  # cooperative, shared
@@ -76,6 +77,17 @@ def generate_room_id() -> str:
         rid = "".join(random.choices(string.ascii_uppercase + string.digits, k=ROOM_ID_LENGTH))
         if rid not in rooms:
             return rid
+
+
+def prune_empty_rooms() -> None:
+    """Delete rooms that have been empty longer than the reconnect grace period."""
+    now = time.time()
+    stale = [
+        rid for rid, room in rooms.items()
+        if room.empty_since is not None and now - room.empty_since > ROOM_GRACE_SECONDS
+    ]
+    for rid in stale:
+        rooms.pop(rid, None)
 
 
 async def broadcast(room: Room, message: dict, exclude: str | None = None):
@@ -153,8 +165,11 @@ async def index():
 
 @app.get("/api/rooms")
 async def list_rooms():
+    prune_empty_rooms()
     result = []
     for rid, room in rooms.items():
+        if not room.players:
+            continue  # hide empty rooms lingering for reconnect
         result.append({
             "room_id": rid,
             "mode": room.mode,
@@ -208,15 +223,17 @@ async def websocket_endpoint(ws: WebSocket):
 
             if msg_type == "set_name":
                 requested = data.get("name", "").strip()[:MAX_NAME_LENGTH]
+                reclaim = data.get("reclaim", False)  # reconnect: same person taking name back
                 if not requested:
                     await ws.send_json({"type": "error", "message": "请输入昵称"})
                     continue
-                # Enforce the allowlist if one is configured.
+                # Enforce the allowlist if one is configured (applies to reclaim too).
                 if allowed_names and requested.lower() not in allowed_names:
                     await ws.send_json({"type": "error", "message": f"昵称「{requested}」不在允许名单中"})
                     continue
-                # Reject if the name is already in use by another connection.
-                if requested.lower() in active_names and requested != player_name:
+                # Reject if the name is in use by another connection — unless this is a
+                # reconnect reclaiming its own name.
+                if not reclaim and requested.lower() in active_names and requested != player_name:
                     await ws.send_json({"type": "error", "message": f"昵称「{requested}」已被占用，请换一个"})
                     continue
                 # Release the previous name if this connection is renaming.
@@ -274,6 +291,7 @@ async def websocket_endpoint(ws: WebSocket):
                     await ws.send_json({"type": "error", "message": "请先设置昵称"})
                     continue
 
+                prune_empty_rooms()
                 room_id = data.get("room_id", "").strip().upper()
                 if room_id not in rooms:
                     await ws.send_json({"type": "error", "message": f"房间 {room_id} 不存在"})
@@ -284,12 +302,11 @@ async def websocket_endpoint(ws: WebSocket):
                     await ws.send_json({"type": "error", "message": "该房间游戏已结束"})
                     continue
 
-                if player_name in room.players:
-                    await ws.send_json({"type": "error", "message": "该昵称已在房间中"})
-                    continue
-
+                # Register (or take over an existing/stale socket on reconnect).
+                # setdefault preserves the player's guess history across a reconnect.
                 room.players[player_name] = ws
-                room.player_guesses[player_name] = []
+                room.player_guesses.setdefault(player_name, [])
+                room.empty_since = None
                 current_room = room
 
                 await ws.send_json({
@@ -466,13 +483,13 @@ async def websocket_endpoint(ws: WebSocket):
                 if current_room and player_name:
                     room = current_room
                     room.players.pop(player_name, None)
+                    if not room.players:
+                        room.empty_since = time.time()  # linger briefly, then pruned
                     await broadcast(room, {
                         "type": "player_left",
                         "name": player_name,
                         "players": list(room.players.keys()),
                     })
-                    if not room.players:
-                        rooms.pop(room.room_id, None)
                     current_room = None
                 await ws.send_json({"type": "left_room"})
 
@@ -481,15 +498,17 @@ async def websocket_endpoint(ws: WebSocket):
     except Exception:
         pass
     finally:
+        # Network drop (e.g. phone lock): keep the room alive for a grace period so the
+        # player can reconnect and rejoin. prune_empty_rooms() reaps it if they don't.
         if current_room and player_name:
             current_room.players.pop(player_name, None)
+            if not current_room.players:
+                current_room.empty_since = time.time()
             await broadcast(current_room, {
                 "type": "player_left",
                 "name": player_name,
                 "players": list(current_room.players.keys()),
             })
-            if not current_room.players:
-                rooms.pop(current_room.room_id, None)
         if player_name:
             active_names.discard(player_name.lower())
 

@@ -201,13 +201,27 @@ let gameMode = "";
 let guessCount = 0;
 let guessHistory = [];
 let latestGuess = null;
+let pendingRejoin = null;  // room to auto-rejoin after a reconnect
+let rejoining = false;     // true while a reconnect rejoin is in flight
 
 function connect() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     ws = new WebSocket(`${proto}//${location.host}/ws`);
     ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
     ws.onclose = () => setTimeout(connect, 2000);
+    ws.onopen = () => {
+        // Reconnect (e.g. after phone unlock): re-establish the server session.
+        if (playerName) {
+            pendingRejoin = currentRoom;
+            send({type: "set_name", name: playerName, reclaim: true});
+        }
+    };
 }
+
+// Resume faster when returning to the tab if the socket dropped while backgrounded.
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && (!ws || ws.readyState === WebSocket.CLOSED)) connect();
+});
 
 function send(data) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
@@ -233,7 +247,7 @@ function setName() {
     send({type: "set_name", name});
 }
 document.getElementById("input-name").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") setName();
+    if (e.key === "Enter" && !e.isComposing) setName();
 });
 
 // --- Lobby ---
@@ -265,7 +279,7 @@ function joinRoom() {
 function joinRoomById(id) { send({type: "join_room", room_id: id}); }
 
 document.getElementById("input-room-id").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") joinRoom();
+    if (e.key === "Enter" && !e.isComposing) joinRoom();
 });
 
 // --- Create Room ---
@@ -284,7 +298,7 @@ function sendGuess() {
     input.value = "";
 }
 document.getElementById("input-guess").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") sendGuess();
+    if (e.key === "Enter" && !e.isComposing) sendGuess();
 });
 
 function sendHint() { send({type: "hint"}); }
@@ -353,18 +367,22 @@ function handleMessage(msg) {
             const badge = document.getElementById("user-badge");
             badge.textContent = `👤 ${playerName}`;
             badge.classList.remove("hidden");
-            showLobby();
+            // Reconnect: rejoin the room we were in instead of dropping to the lobby.
+            if (pendingRejoin) {
+                const room = pendingRejoin;
+                pendingRejoin = null;
+                rejoining = true;
+                send({type: "join_room", room_id: room});
+            } else {
+                showLobby();
+            }
             break;
 
-        case "room_joined":
+        case "room_joined": {
+            const isRejoin = rejoining;
+            rejoining = false;
             currentRoom = msg.room_id;
             gameMode = msg.mode;
-            guessCount = 0;
-            guessHistory = [];
-            latestGuess = null;
-            document.getElementById("guess-tbody").innerHTML = "";
-            document.getElementById("scoreboard-list").innerHTML = "";
-            document.getElementById("scoreboard-area").classList.add("hidden");
             document.getElementById("win-banner").classList.add("hidden");
             document.getElementById("game-input-area").classList.remove("hidden");
             document.getElementById("game-info").textContent =
@@ -378,11 +396,24 @@ function handleMessage(msg) {
                 thead.innerHTML = "<th>#</th><th>词</th><th>相似度</th><th>排名</th><th></th>";
                 document.getElementById("scoreboard-area").classList.remove("hidden");
             }
-            // Load history for cooperative late-joiners
-            if (msg.history) msg.history.forEach(r => addGuessRow(r));
+            if (msg.mode === "cooperative") {
+                // Coop history is authoritative from the server (covers fresh + rejoin).
+                guessCount = 0; guessHistory = []; latestGuess = null;
+                document.getElementById("guess-tbody").innerHTML = "";
+                (msg.history || []).forEach(r => addGuessRow(r));
+            } else if (isRejoin) {
+                // Competitive rejoin: our guesses live only client-side — keep and re-render.
+                renderGuessTable();
+            } else {
+                // Fresh competitive join: clean slate.
+                guessCount = 0; guessHistory = []; latestGuess = null;
+                document.getElementById("guess-tbody").innerHTML = "";
+                document.getElementById("scoreboard-list").innerHTML = "";
+            }
             show("screen-game");
             document.getElementById("input-guess").focus();
             break;
+        }
 
         case "guess_result":
             addGuessRow(msg);
@@ -440,6 +471,12 @@ function handleMessage(msg) {
 
         case "error":
             showToast(msg.message);
+            // A failed reconnect rejoin (room gone/finished) shouldn't strand the player.
+            if (rejoining) {
+                rejoining = false;
+                currentRoom = null;
+                showLobby();
+            }
             break;
     }
 }
