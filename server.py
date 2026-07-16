@@ -5,20 +5,23 @@
 import argparse
 import os
 import random
+import secrets
 import string
 import sys
 import time
 from dataclasses import dataclass, field
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
+import stats
 from config import (
     DEFAULT_VECTORS_PATH, DEFAULT_LIMIT, DEFAULT_HOST, DEFAULT_PORT,
     ROOM_ID_LENGTH, MAX_NAME_LENGTH,
     HINT_INTERVAL, HINT_CAP_DELTA, MIN_HINT_RANK,
+    STATS_DB_PATH,
 )
 from engine import GameEngine, to_simplified
 from words import CANDIDATE_WORDS
@@ -31,6 +34,13 @@ valid_candidates: list[str] = []
 
 # Optional nickname allowlist (lowercased). Empty set = anyone may enter.
 allowed_names: set[str] = set()
+
+# Secret token gating the admin stats page/API. Set at startup.
+admin_token: str = ""
+
+
+def check_admin(key: str) -> bool:
+    return bool(admin_token) and secrets.compare_digest(key, admin_token)
 
 # Hint tuning (HINT_INTERVAL, HINT_CAP_DELTA, MIN_HINT_RANK) is imported from config.
 # They remain module globals here so tests can still override e.g. server.HINT_INTERVAL.
@@ -92,6 +102,17 @@ def guess_count_for(room: Room, player: str) -> int:
     return len(room.player_guesses.get(player, []))
 
 
+def per_player_guess_counts(room: Room) -> dict[str, int]:
+    """Guesses made by each participant (everyone who joined the room)."""
+    counts = {}
+    for player in room.player_guesses.keys():
+        if room.mode == "cooperative":
+            counts[player] = sum(1 for g in room.shared_guesses if g["player"] == player)
+        else:
+            counts[player] = len(room.player_guesses[player])
+    return counts
+
+
 def used_milestone(room: Room, player: str) -> int:
     if room.mode == "cooperative":
         return room.coop_hint_used_milestone
@@ -142,6 +163,27 @@ async def list_rooms():
             "finished": room.winner is not None,
         })
     return result
+
+
+@app.get("/admin")
+async def admin_page(key: str = ""):
+    if not check_admin(key):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return FileResponse(os.path.join(STATIC_DIR, "admin.html"))
+
+
+@app.get("/api/stats/players")
+async def stats_players(key: str = ""):
+    if not check_admin(key):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return stats.get_player_stats()
+
+
+@app.get("/api/stats/games")
+async def stats_games(key: str = "", limit: int = 50):
+    if not check_admin(key):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return stats.get_recent_games(limit)
 
 
 # Mount static files (CSS, JS if any) after explicit routes
@@ -341,6 +383,20 @@ async def websocket_endpoint(ws: WebSocket):
                         "word": word,
                         "guesses": guess_count_for(room, player_name),
                     })
+                    # Persist the finished game (runs once — later guesses short-circuit).
+                    try:
+                        stats.record_game(
+                            room_id=room.room_id,
+                            mode=room.mode,
+                            answer=room.secret,
+                            host=room.host,
+                            winner=player_name,
+                            player_guesses=per_player_guess_counts(room),
+                            started_at=room.created_at,
+                            finished_at=time.time(),
+                        )
+                    except Exception as e:
+                        print(f"Failed to record game stats: {e}")
 
             elif msg_type == "hint":
                 if not current_room or not player_name:
@@ -480,15 +536,23 @@ def main():
                         help="Comma-separated nickname allowlist. If set, only these names may enter.")
     parser.add_argument("--allow-names-file", default="",
                         help="Path to a file with one allowed nickname per line.")
+    parser.add_argument("--stats-db", default=STATS_DB_PATH,
+                        help="Path to the SQLite stats database.")
+    parser.add_argument("--admin-token", default="",
+                        help="Secret token for the admin stats page. Auto-generated if omitted.")
     args = parser.parse_args()
 
-    global engine, valid_candidates, allowed_names
+    global engine, valid_candidates, allowed_names, admin_token
 
     names = [n.strip() for n in args.allow_names.split(",") if n.strip()]
     if args.allow_names_file:
         with open(args.allow_names_file, encoding="utf-8") as f:
             names += [line.strip() for line in f if line.strip()]
     allowed_names = {n.lower() for n in names}
+
+    admin_token = args.admin_token or secrets.token_urlsafe(16)
+
+    stats.init_db(args.stats_db)
 
     engine = load_engine(args.vectors, args.limit)
     valid_candidates = [w for w in CANDIDATE_WORDS if engine.validate_word(w)]
@@ -503,6 +567,7 @@ def main():
         print(f"Name allowlist active: {len(allowed_names)} names permitted")
     else:
         print("Name allowlist: disabled (anyone may enter)")
+    print(f"Admin stats page: http://{args.host}:{args.port}/admin?key={admin_token}")
     uvicorn.run(app, host=args.host, port=args.port)
 
 

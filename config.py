@@ -13,6 +13,9 @@ DEFAULT_LIMIT = 1_000_000  # max vectors to load (file is frequency-sorted)
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8000
 
+# --- Stats ---
+STATS_DB_PATH = "data/stats.db"  # SQLite file for persistent game statistics
+
 # --- Rooms / players ---
 ROOM_ID_LENGTH = 4
 MAX_NAME_LENGTH = 20

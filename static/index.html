@@ -143,6 +143,7 @@ button:disabled { background: #555; cursor: not-allowed; }
         <input id="input-room-id" type="text" placeholder="输入房间号加入..." maxlength="4" style="text-transform:uppercase">
         <button onclick="joinRoom()">加入房间</button>
     </div>
+
 </div>
 
 <!-- Screen: Create Room -->
@@ -180,7 +181,7 @@ button:disabled { background: #555; cursor: not-allowed; }
     </div>
     <div id="game-results">
         <table class="guess-table">
-            <thead><tr><th>#</th><th>词</th><th>相似度</th><th>排名</th><th></th></tr></thead>
+            <thead><tr id="guess-thead"><th>#</th><th>词</th><th>相似度</th><th>排名</th><th></th></tr></thead>
             <tbody id="guess-tbody"></tbody>
         </table>
     </div>
@@ -370,7 +371,7 @@ function handleMessage(msg) {
                 `房间: ${msg.room_id} | 模式: ${msg.mode === "cooperative" ? "合作" : "竞争"} | 词表: ${msg.total_words}词`;
             document.getElementById("game-players").textContent = `玩家: ${msg.players.join(", ")}`;
             // Update table header for cooperative mode
-            const thead = document.querySelector(".guess-table thead tr");
+            const thead = document.getElementById("guess-thead");
             if (msg.mode === "cooperative") {
                 thead.innerHTML = "<th>#</th><th>玩家</th><th>词</th><th>相似度</th><th>排名</th><th></th>";
             } else {

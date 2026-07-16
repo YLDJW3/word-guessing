@@ -71,6 +71,28 @@ python server.py --allow-names alice,bob,charlie
 python server.py --allow-names-file friends.txt
 ```
 
+### Admin stats page
+
+Finished games are recorded to a SQLite database (`data/stats.db` by default; override
+with `--stats-db`). Stats are **admin-only**, served at a separate address gated by a
+secret token — players can't see them.
+
+```bash
+# Provide your own token (stable URL you can bookmark)
+python server.py --admin-token mysecret
+
+# Or omit it — a random token is generated and printed at startup:
+#   Admin stats page: http://0.0.0.0:8000/admin?key=<token>
+```
+
+Open `http://<your-ip>:8000/admin?key=<token>` to view:
+- **Player leaderboard** — games played, wins, win rate.
+- **Recent games** — answer, mode, winner + guesses taken, participants, time.
+
+The `/admin` page and the `/api/stats/*` endpoints both require the correct `key`
+(returns 403 otherwise). Note the token appears in the URL, so it may show up in
+server/proxy logs — fine for a friend group.
+
 ### Game modes
 
 | Mode | Description |
@@ -94,13 +116,16 @@ Hints are **earned and bounded** so they help without spoiling:
 
 - **Earned:** one hint per 100 guesses. Cooperative counts the room's total guesses;
   competitive counts each player's own. Hints don't stack (one held at a time).
-- **Capped:** the revealed word's similarity is at most **+10 percentage points** above
+- **Capped:** the revealed word's similarity is at most **+5 percentage points** above
   your current closest guess — a nudge forward, not a giveaway.
 - **Rank buffer:** a hint never reveals a word among the **100 closest** to the answer.
   Once your best guess reaches the top 100, hints turn off automatically.
 
 The 💡 button shows a countdown to the next hint and enables when one is available.
 In cooperative mode a hint is broadcast to everyone; in competitive it's private.
+
+These values (hint interval, cap, rank buffer, temperature thresholds, defaults) are all
+tunable in `config.py`.
 
 ### Deployment
 
@@ -149,8 +174,11 @@ Traditional Chinese input (e.g. 「愛」) is automatically converted to simplif
 game.py              # Single-player CLI
 server.py            # Multiplayer web server (FastAPI + WebSocket)
 engine.py            # Shared game logic (validate, rank, score)
+stats.py             # SQLite persistence for game statistics
+config.py            # Central config (defaults, hint tuning, thresholds)
 words.py             # Curated candidate secret words (~200)
-static/index.html    # Web frontend (vanilla HTML/JS, no build step)
+static/index.html    # Player web frontend (vanilla HTML/JS, no build step)
+static/admin.html    # Admin stats page (token-gated)
 download_vectors.sh  # Download vectors from Google Drive
 requirements.txt     # Python dependencies
 ```
