@@ -76,6 +76,16 @@ button:disabled { background: #555; cursor: not-allowed; }
     font-weight: 700;
     border-bottom: 2px solid #e94560;
 }
+.simcell { position: relative; min-width: 64px; }
+.simbar { position: absolute; left: 0; bottom: -3px; height: 3px; border-radius: 2px; opacity: .75; background: #74b9ff; }
+.guess-table tr.hot .simbar { background: #ff6b6b; }
+.guess-table tr.warm .simbar { background: #ffa502; }
+.guess-table tr.cold .simbar { background: #74b9ff; }
+.closest-note { font-size: 0.9rem; color: #ffa502; margin-bottom: 8px; }
+.reveal-area { margin-top: 16px; }
+.reveal-area h3 { font-size: 1rem; margin-bottom: 8px; color: #aaa; }
+.reveal-word { display: inline-block; background: #0f3460; border-radius: 6px;
+    padding: 3px 8px; margin: 3px; font-size: 0.85rem; }
 .scoreboard { margin-top: 16px; }
 .scoreboard h3 { font-size: 1rem; margin-bottom: 8px; color: #aaa; }
 .score-item {
@@ -184,6 +194,7 @@ button:disabled { background: #555; cursor: not-allowed; }
     <div id="game-header">
         <p class="room-info" id="game-info"></p>
         <p class="players-list" id="game-players"></p>
+        <p class="closest-note hidden" id="closest-note"></p>
     </div>
     <div id="game-input-area">
         <div class="row">
@@ -204,6 +215,10 @@ button:disabled { background: #555; cursor: not-allowed; }
     <div id="scoreboard-area" class="scoreboard hidden">
         <h3>🏆 排行榜</h3>
         <div id="scoreboard-list"></div>
+    </div>
+    <div id="reveal-area" class="reveal-area hidden">
+        <h3>🔍 最接近的词</h3>
+        <div id="reveal-words"></div>
     </div>
 </div>
 
@@ -400,6 +415,8 @@ function leaveRoom() {
     document.getElementById("guess-tbody").innerHTML = "";
     document.getElementById("win-banner").classList.add("hidden");
     document.getElementById("scoreboard-area").classList.add("hidden");
+    document.getElementById("reveal-area").classList.add("hidden");
+    document.getElementById("closest-note").classList.add("hidden");
     showLobby();
 }
 
@@ -407,13 +424,24 @@ function addGuessRow(result) {
     guessHistory.push(result);
     latestGuess = result;
     renderGuessTable();
+    updateClosest();
 }
 
 function guessRow(r, num, extraClass = "") {
     const cls = r.rank <= 100 ? "hot" : r.rank <= 1000 ? "warm" : "cold";
     const playerCol = showPlayerColumn ? `<td>${r.player}</td>` : "";
+    const w = Math.max(0, Math.min(100, r.similarity));
     return `<tr class="${cls} ${extraClass}"><td>${num}</td>${playerCol}<td>${r.word}</td>
-        <td>${r.similarity}%</td><td>第${r.rank}近</td><td>${r.temperature}</td></tr>`;
+        <td><div class="simcell"><span>${r.similarity}%</span><i class="simbar" style="width:${w}%"></i></div></td>
+        <td>第${r.rank}近</td><td>${r.temperature}</td></tr>`;
+}
+
+function updateClosest() {
+    const note = document.getElementById("closest-note");
+    if (!guessHistory.length) { note.classList.add("hidden"); return; }
+    const best = guessHistory.reduce((a, b) => (b.similarity > a.similarity ? b : a));
+    note.textContent = `最接近: ${best.similarity}% · 第${best.rank}近 「${best.word}」`;
+    note.classList.remove("hidden");
 }
 
 function renderGuessTable() {
@@ -426,6 +454,14 @@ function renderGuessTable() {
     }
     html += sorted.map((r, i) => guessRow(r, i + 1)).join("");
     tbody.innerHTML = html;
+}
+
+function renderReveal(topWords) {
+    if (!topWords || !topWords.length) return;
+    const area = document.getElementById("reveal-area");
+    document.getElementById("reveal-words").innerHTML = topWords.map(w =>
+        `<span class="reveal-word">${w.word} <b>${w.similarity}%</b></span>`).join("");
+    area.classList.remove("hidden");
 }
 
 function updateScoreboard(scoreboard) {
@@ -466,9 +502,11 @@ function handleMessage(msg) {
             currentRoom = msg.room_id;
             gameMode = msg.mode;
             isSpectator = !!msg.spectator;
-            showPlayerColumn = (msg.mode === "cooperative") || isSpectator;
+            showPlayerColumn = (msg.mode === "cooperative") || isSpectator || !!msg.finished;
             saveSession();
             document.getElementById("win-banner").classList.add("hidden");
+            document.getElementById("reveal-area").classList.add("hidden");
+            document.getElementById("closest-note").classList.add("hidden");
             document.getElementById("game-input-area").classList.remove("hidden");
             document.getElementById("game-info").textContent =
                 `房间: ${msg.room_id} | 模式: ${msg.mode === "cooperative" ? "合作" : "竞争"} | 词表: ${msg.total_words}词`;
@@ -490,8 +528,9 @@ function handleMessage(msg) {
             (msg.history || []).forEach(r => addGuessRow(r));
             show("screen-game");
             if (msg.finished) {
-                // Rejoined a finished room: show the result read-only.
+                // Rejoined a finished room: show the result read-only + reveal.
                 showFinishedBanner(msg.winner, msg.answer, msg.winner_guesses);
+                renderReveal(msg.top_words);
             } else if (isSpectator) {
                 // Quizmaster host: watch-only, answer revealed, no guessing.
                 const banner = document.getElementById("win-banner");
@@ -538,6 +577,19 @@ function handleMessage(msg) {
 
         case "game_won":
             showFinishedBanner(msg.winner, msg.word, msg.guesses);
+            break;
+
+        case "reveal":
+            // Game over: reveal everyone's guesses + the closest words.
+            showPlayerColumn = true;
+            document.getElementById("guess-thead").innerHTML =
+                "<th>#</th><th>玩家</th><th>词</th><th>相似度</th><th>排名</th><th></th>";
+            if (msg.guesses) {
+                guessHistory = []; latestGuess = null;
+                document.getElementById("guess-tbody").innerHTML = "";
+                msg.guesses.forEach(r => addGuessRow(r));
+            }
+            renderReveal(msg.top_words);
             break;
 
         case "player_joined":

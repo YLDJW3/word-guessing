@@ -21,7 +21,7 @@ from config import (
     DEFAULT_VECTORS_PATH, DEFAULT_LIMIT, DEFAULT_HOST, DEFAULT_PORT,
     ROOM_ID_LENGTH, MAX_NAME_LENGTH, MAX_ROOMS,
     HINT_INTERVAL, HINT_CAP_DELTA, MIN_HINT_RANK,
-    STATS_DB_PATH,
+    STATS_DB_PATH, REVEAL_TOP_N,
 )
 from engine import GameEngine, to_simplified
 from words import CANDIDATE_WORDS
@@ -125,6 +125,23 @@ def is_spectator(room: Room, name: str) -> bool:
     """The host of a custom competitive room is a quizmaster: they set the word, so they
     watch (see everyone's guesses) instead of playing."""
     return room.custom and room.mode == "competitive" and name == room.host
+
+
+def all_guesses(room: Room) -> list[dict]:
+    """Every guess made in the room (each carries a `player` field)."""
+    if room.mode == "cooperative":
+        return list(room.shared_guesses)
+    return [g for gs in room.player_guesses.values() for g in gs]
+
+
+def build_reveal(room: Room) -> dict:
+    """Post-game reveal: the closest words to the answer + everyone's guess paths."""
+    top = sorted(
+        ((w, r, s) for w, (r, s) in room.rank_map.items() if 1 <= r <= REVEAL_TOP_N),
+        key=lambda x: x[1],
+    )
+    top_words = [{"word": w, "rank": r, "similarity": round(s * 100, 2)} for w, r, s in top]
+    return {"top_words": top_words, "guesses": all_guesses(room)}
 
 
 # ---------------------------------------------------------------------------
@@ -345,11 +362,9 @@ async def websocket_endpoint(ws: WebSocket):
                     room.player_guesses.setdefault(player_name, [])
                 current_room = room
 
-                if room.mode == "cooperative":
-                    history = room.shared_guesses
-                elif spectator:
-                    # Quizmaster sees every player's guesses.
-                    history = [g for gs in room.player_guesses.values() for g in gs]
+                if room.winner is not None or room.mode == "cooperative" or spectator:
+                    # Finished (reveal), coop, and the quizmaster all see every guess.
+                    history = all_guesses(room)
                 else:
                     history = room.player_guesses.get(player_name, [])
                 payload = {
@@ -369,6 +384,7 @@ async def websocket_endpoint(ws: WebSocket):
                 if room.winner is not None:
                     payload["winner"] = room.winner
                     payload["winner_guesses"] = guess_count_for(room, room.winner)
+                    payload["top_words"] = build_reveal(room)["top_words"]
                 await ws.send_json(payload)
 
                 await ws.send_json(hint_status_msg(room, player_name))
@@ -454,6 +470,8 @@ async def websocket_endpoint(ws: WebSocket):
                         "word": word,
                         "guesses": guess_count_for(room, player_name),
                     })
+                    # Post-game reveal: everyone's guesses + the closest words to the answer.
+                    await broadcast(room, {"type": "reveal", "answer": room.secret, **build_reveal(room)})
                     # Persist the finished game (runs once — later guesses short-circuit).
                     try:
                         stats.record_game(

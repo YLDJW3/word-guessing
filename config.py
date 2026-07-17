@@ -21,6 +21,9 @@ ROOM_ID_LENGTH = 4
 MAX_NAME_LENGTH = 20
 MAX_ROOMS = 10  # keep this many recent rooms as rejoinable history; evict oldest idle beyond
 
+# --- Post-game reveal ---
+REVEAL_TOP_N = 10  # how many of the closest words to the answer to reveal when a game ends
+
 # --- Hints ---
 HINT_INTERVAL = 100    # one hint earned per this many guesses
 HINT_CAP_DELTA = 0.05  # hint word similarity must be <= best + this (cosine points)
