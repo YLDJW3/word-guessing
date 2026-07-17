@@ -19,7 +19,7 @@ import uvicorn
 import stats
 from config import (
     DEFAULT_VECTORS_PATH, DEFAULT_LIMIT, DEFAULT_HOST, DEFAULT_PORT,
-    ROOM_ID_LENGTH, MAX_NAME_LENGTH, ROOM_GRACE_SECONDS,
+    ROOM_ID_LENGTH, MAX_NAME_LENGTH, MAX_ROOMS,
     HINT_INTERVAL, HINT_CAP_DELTA, MIN_HINT_RANK,
     STATS_DB_PATH,
 )
@@ -56,12 +56,12 @@ class Room:
     rank_map: dict
     mode: str  # "competitive" or "cooperative"
     host: str
+    custom: bool = False  # True when the host set the secret (custom-word room)
     players: dict[str, WebSocket] = field(default_factory=dict)
     player_guesses: dict[str, list] = field(default_factory=dict)
     shared_guesses: list = field(default_factory=list)
     winner: str | None = None
     created_at: float = field(default_factory=time.time)
-    empty_since: float | None = None  # set when last player leaves; None while occupied
     # Hint tracking. Milestone = how many HINT_INTERVAL blocks have been consumed.
     hint_used_milestone: dict[str, int] = field(default_factory=dict)  # competitive, per player
     coop_hint_used_milestone: int = 0  # cooperative, shared
@@ -79,15 +79,15 @@ def generate_room_id() -> str:
             return rid
 
 
-def prune_empty_rooms() -> None:
-    """Delete rooms that have been empty longer than the reconnect grace period."""
-    now = time.time()
-    stale = [
-        rid for rid, room in rooms.items()
-        if room.empty_since is not None and now - room.empty_since > ROOM_GRACE_SECONDS
-    ]
-    for rid in stale:
-        rooms.pop(rid, None)
+def evict_old_rooms() -> None:
+    """Keep at most MAX_ROOMS rooms as rejoinable history. Evict the oldest rooms with no
+    connected players first (dict is insertion-ordered); never kick an active room, so a
+    transient overflow is possible if all rooms are occupied."""
+    while len(rooms) > MAX_ROOMS:
+        victim = next((rid for rid, room in rooms.items() if not room.players), None)
+        if victim is None:
+            break
+        rooms.pop(victim, None)
 
 
 async def broadcast(room: Room, message: dict, exclude: str | None = None):
@@ -102,6 +102,29 @@ async def broadcast(room: Room, message: dict, exclude: str | None = None):
             disconnected.append(name)
     for name in disconnected:
         del room.players[name]
+
+
+def build_scoreboard(room: Room) -> list[dict]:
+    """Competitive standings: each player's best rank/similarity and guess count.
+    The actual word is deliberately omitted (would leak opponents' guesses)."""
+    scoreboard = []
+    for pname, guesses in room.player_guesses.items():
+        if guesses:
+            best = min(guesses, key=lambda g: g["rank"])
+            scoreboard.append({
+                "name": pname,
+                "best_rank": best["rank"],
+                "best_similarity": best["similarity"],
+                "guess_count": len(guesses),
+            })
+    scoreboard.sort(key=lambda s: s["best_rank"])
+    return scoreboard
+
+
+def is_spectator(room: Room, name: str) -> bool:
+    """The host of a custom competitive room is a quizmaster: they set the word, so they
+    watch (see everyone's guesses) instead of playing."""
+    return room.custom and room.mode == "competitive" and name == room.host
 
 
 # ---------------------------------------------------------------------------
@@ -165,11 +188,9 @@ async def index():
 
 @app.get("/api/rooms")
 async def list_rooms():
-    prune_empty_rooms()
+    # Recent rooms as rejoinable history — newest first, including empty and finished.
     result = []
     for rid, room in rooms.items():
-        if not room.players:
-            continue  # hide empty rooms lingering for reconnect
         result.append({
             "room_id": rid,
             "mode": room.mode,
@@ -177,6 +198,7 @@ async def list_rooms():
             "host": room.host,
             "finished": room.winner is not None,
         })
+    result.reverse()
     return result
 
 
@@ -188,9 +210,8 @@ async def admin_page(key: str = ""):
 
 
 @app.get("/api/stats/players")
-async def stats_players(key: str = ""):
-    if not check_admin(key):
-        raise HTTPException(status_code=403, detail="Forbidden")
+async def stats_players():
+    # Public: player win/loss leaderboard (no answers revealed).
     return stats.get_player_stats()
 
 
@@ -203,6 +224,14 @@ async def stats_games(key: str = "", limit: int = 50):
 
 # Mount static files (CSS, JS if any) after explicit routes
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+# Catch-all deep link: /{name} serves the SPA, which reads the nickname from the path.
+# Declared last so explicit routes (/, /admin, /api/*) and /static win first. A path param
+# without a :path converter matches only a single segment, so /api/stats/* etc. never hit it.
+@app.get("/{name}")
+async def named_entry(name: str):
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
 # ---------------------------------------------------------------------------
@@ -270,20 +299,29 @@ async def websocket_endpoint(ws: WebSocket):
                     rank_map=rank_map,
                     mode=mode,
                     host=player_name,
+                    custom=bool(custom_word),
                 )
                 room.players[player_name] = ws
-                room.player_guesses[player_name] = []
+                spectator = is_spectator(room, player_name)
+                if not spectator:
+                    room.player_guesses[player_name] = []
                 rooms[room_id] = room
+                evict_old_rooms()  # keep the room history bounded
                 current_room = room
 
-                await ws.send_json({
+                payload = {
                     "type": "room_joined",
                     "room_id": room_id,
                     "mode": mode,
                     "players": list(room.players.keys()),
                     "total_words": engine.total,
                     "is_host": True,
-                })
+                    "custom": room.custom,
+                    "spectator": spectator,
+                }
+                if spectator:
+                    payload["answer"] = room.secret  # host set it, so reveal to them
+                await ws.send_json(payload)
                 await ws.send_json(hint_status_msg(room, player_name))
 
             elif msg_type == "join_room":
@@ -291,35 +329,53 @@ async def websocket_endpoint(ws: WebSocket):
                     await ws.send_json({"type": "error", "message": "请先设置昵称"})
                     continue
 
-                prune_empty_rooms()
                 room_id = data.get("room_id", "").strip().upper()
                 if room_id not in rooms:
                     await ws.send_json({"type": "error", "message": f"房间 {room_id} 不存在"})
                     continue
 
                 room = rooms[room_id]
-                if room.winner:
-                    await ws.send_json({"type": "error", "message": "该房间游戏已结束"})
-                    continue
-
-                # Register (or take over an existing/stale socket on reconnect).
-                # setdefault preserves the player's guess history across a reconnect.
+                # Finished rooms are rejoinable (read-only result); empty unfinished rooms
+                # are rejoinable to continue. Register / take over the socket either way.
                 room.players[player_name] = ws
-                room.player_guesses.setdefault(player_name, [])
-                room.empty_since = None
+                spectator = is_spectator(room, player_name)
+                # setdefault preserves the player's guess history across a reconnect; the
+                # spectator host is never enrolled as a guesser.
+                if not spectator:
+                    room.player_guesses.setdefault(player_name, [])
                 current_room = room
 
-                await ws.send_json({
+                if room.mode == "cooperative":
+                    history = room.shared_guesses
+                elif spectator:
+                    # Quizmaster sees every player's guesses.
+                    history = [g for gs in room.player_guesses.values() for g in gs]
+                else:
+                    history = room.player_guesses.get(player_name, [])
+                payload = {
                     "type": "room_joined",
                     "room_id": room_id,
                     "mode": room.mode,
                     "players": list(room.players.keys()),
                     "total_words": engine.total,
-                    "is_host": False,
-                    "history": room.shared_guesses if room.mode == "cooperative" else [],
-                })
+                    "is_host": player_name == room.host,
+                    "history": history,
+                    "finished": room.winner is not None,
+                    "custom": room.custom,
+                    "spectator": spectator,
+                }
+                if room.winner is not None or spectator:
+                    payload["answer"] = room.secret
+                if room.winner is not None:
+                    payload["winner"] = room.winner
+                    payload["winner_guesses"] = guess_count_for(room, room.winner)
+                await ws.send_json(payload)
 
                 await ws.send_json(hint_status_msg(room, player_name))
+
+                # Standings for a (re)joining competitive player — live or final.
+                if room.mode == "competitive":
+                    await ws.send_json({"type": "scoreboard", "scoreboard": build_scoreboard(room)})
 
                 await broadcast(room, {
                     "type": "player_joined",
@@ -335,6 +391,10 @@ async def websocket_endpoint(ws: WebSocket):
                 room = current_room
                 if room.winner:
                     await ws.send_json({"type": "error", "message": "游戏已结束"})
+                    continue
+
+                if is_spectator(room, player_name):
+                    await ws.send_json({"type": "error", "message": "你是出题者，无法猜词"})
                     continue
 
                 raw = data.get("word", "").strip()
@@ -375,21 +435,15 @@ async def websocket_endpoint(ws: WebSocket):
                     room.player_guesses[player_name].append(result)
                     await ws.send_json(result)
                     await ws.send_json(hint_status_msg(room, player_name))
-                    # Broadcast scoreboard update
-                    scoreboard = []
-                    for pname, guesses in room.player_guesses.items():
-                        if guesses:
-                            best = min(guesses, key=lambda g: g["rank"])
-                            # Note: deliberately omit the actual word — in competitive
-                            # mode showing it would hint opponents' guesses.
-                            scoreboard.append({
-                                "name": pname,
-                                "best_rank": best["rank"],
-                                "best_similarity": best["similarity"],
-                                "guess_count": len(guesses),
-                            })
-                    scoreboard.sort(key=lambda s: s["best_rank"])
-                    await broadcast(room, {"type": "scoreboard", "scoreboard": scoreboard})
+                    await broadcast(room, {"type": "scoreboard", "scoreboard": build_scoreboard(room)})
+                    # Custom room: the quizmaster host watches every player's guesses.
+                    if room.custom and room.host != player_name:
+                        host_ws = room.players.get(room.host)
+                        if host_ws is not None:
+                            try:
+                                await host_ws.send_json(result)
+                            except Exception:
+                                pass
 
                 # Check win
                 if result["is_answer"]:
@@ -483,8 +537,7 @@ async def websocket_endpoint(ws: WebSocket):
                 if current_room and player_name:
                     room = current_room
                     room.players.pop(player_name, None)
-                    if not room.players:
-                        room.empty_since = time.time()  # linger briefly, then pruned
+                    # Room is kept as rejoinable history (evicted only when over capacity).
                     await broadcast(room, {
                         "type": "player_left",
                         "name": player_name,
@@ -498,12 +551,10 @@ async def websocket_endpoint(ws: WebSocket):
     except Exception:
         pass
     finally:
-        # Network drop (e.g. phone lock): keep the room alive for a grace period so the
-        # player can reconnect and rejoin. prune_empty_rooms() reaps it if they don't.
+        # Network drop (e.g. phone lock) or tab close: remove the player but keep the room
+        # as history so they (or others) can rejoin it later.
         if current_room and player_name:
             current_room.players.pop(player_name, None)
-            if not current_room.players:
-                current_room.empty_since = time.time()
             await broadcast(current_room, {
                 "type": "player_left",
                 "name": player_name,

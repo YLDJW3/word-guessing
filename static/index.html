@@ -144,6 +144,22 @@ button:disabled { background: #555; cursor: not-allowed; }
         <button onclick="joinRoom()">加入房间</button>
     </div>
 
+    <div style="margin-top:16px">
+        <button class="btn-secondary" onclick="showLeaderboard()" style="width:100%">🏆 排行榜</button>
+    </div>
+
+</div>
+
+<!-- Screen: Leaderboard -->
+<div id="screen-leaderboard" class="card hidden">
+    <h2 style="margin-bottom:16px">🏆 排行榜</h2>
+    <table class="guess-table">
+        <thead><tr><th>#</th><th>玩家</th><th>场次</th><th>胜场</th><th>胜率</th></tr></thead>
+        <tbody id="lb-players"></tbody>
+    </table>
+    <div style="margin-top:16px">
+        <button class="btn-secondary" onclick="showLobby()" style="width:100%">返回</button>
+    </div>
 </div>
 
 <!-- Screen: Create Room -->
@@ -203,6 +219,34 @@ let guessHistory = [];
 let latestGuess = null;
 let pendingRejoin = null;  // room to auto-rejoin after a reconnect
 let rejoining = false;     // true while a reconnect rejoin is in flight
+let isSpectator = false;   // quizmaster host in a custom competitive room
+let showPlayerColumn = false;  // show a 玩家 column (cooperative feed or spectator view)
+
+// --- Session persistence (survives page refresh) ---
+const SESSION_KEY = "wg_session";
+const SESSION_TTL_MS = 5 * 60 * 1000;  // auto-restore only within this window
+
+function saveSession() {
+    try {
+        localStorage.setItem(SESSION_KEY, JSON.stringify({
+            name: playerName, room: currentRoom, ts: Date.now(),
+        }));
+    } catch (e) {}
+}
+function clearSessionRoom() {
+    try {
+        const s = JSON.parse(localStorage.getItem(SESSION_KEY) || "{}");
+        s.room = null; s.ts = Date.now();
+        localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+    } catch (e) {}
+}
+function loadSession() {
+    try {
+        const s = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+        if (s && s.name && Date.now() - s.ts < SESSION_TTL_MS) return s;
+    } catch (e) {}
+    return null;
+}
 
 function connect() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -254,6 +298,26 @@ document.getElementById("input-name").addEventListener("keydown", (e) => {
 function showLobby() { show("screen-lobby"); refreshRooms(); }
 function showCreate() { show("screen-create"); }
 
+// --- Leaderboard (public: player win/loss rankings) ---
+function showLeaderboard() {
+    show("screen-leaderboard");
+    const tbody = document.getElementById("lb-players");
+    tbody.innerHTML = '<tr><td colspan="5" style="color:#666">加载中…</td></tr>';
+    fetch("/api/stats/players").then(r => r.json()).then(players => {
+        if (!players.length) {
+            tbody.innerHTML = '<tr><td colspan="5" style="color:#666">暂无数据</td></tr>';
+            return;
+        }
+        tbody.innerHTML = players.map((p, i) => {
+            const rate = p.played ? Math.round(100 * p.wins / p.played) : 0;
+            return `<tr><td>${i + 1}</td><td>${p.player}</td><td>${p.played}</td>
+                <td>${p.wins}</td><td>${rate}%</td></tr>`;
+        }).join("");
+    }).catch(() => {
+        tbody.innerHTML = '<tr><td colspan="5" style="color:#e94560">加载失败</td></tr>';
+    });
+}
+
 function refreshRooms() {
     fetch("/api/rooms").then(r => r.json()).then(rooms => {
         const list = document.getElementById("room-list");
@@ -261,13 +325,17 @@ function refreshRooms() {
             list.innerHTML = '<p style="color:#666;font-size:0.9rem;padding:10px 0">暂无房间</p>';
             return;
         }
-        list.innerHTML = rooms.filter(r => !r.finished).map(r => `
-            <div class="room-list-item">
-                <span>${r.room_id} <span class="mode-tag">${r.mode === "cooperative" ? "合作" : "竞争"}</span>
+        list.innerHTML = rooms.map(r => {
+            const status = r.finished ? "已结束" : "进行中";
+            const label = r.finished ? "查看" : "加入";
+            return `<div class="room-list-item">
+                <span>${r.room_id}
+                    <span class="mode-tag">${r.mode === "cooperative" ? "合作" : "竞争"}</span>
+                    <span class="mode-tag">${status}</span>
                     — ${r.player_count}人 (${r.host})</span>
-                <button onclick="joinRoomById('${r.room_id}')">加入</button>
-            </div>
-        `).join("");
+                <button onclick="joinRoomById('${r.room_id}')">${label}</button>
+            </div>`;
+        }).join("");
     });
 }
 
@@ -309,12 +377,26 @@ function updateHintButton(available, nextIn) {
     btn.textContent = available ? "💡 提示 (可用)" : `💡 提示 (还需${nextIn}次)`;
 }
 
+// Read-only result banner: shown when a game is won live, and when rejoining a finished room.
+function showFinishedBanner(winner, answer, guesses) {
+    const banner = document.getElementById("win-banner");
+    banner.classList.remove("hidden");
+    banner.innerHTML = `<h2>🎉 ${winner} 猜对了！</h2>
+        <p>答案: ${answer} | 用了 ${guesses} 次</p>
+        <button onclick="leaveRoom()" style="margin-top:12px">返回大厅</button>`;
+    document.getElementById("game-input-area").classList.add("hidden");
+}
+
 function leaveRoom() {
     send({type: "leave_room"});
     currentRoom = null;
+    clearSessionRoom();  // don't auto-rejoin a room we intentionally left
     guessCount = 0;
     guessHistory = [];
     latestGuess = null;
+    isSpectator = false;
+    showPlayerColumn = false;
+    document.getElementById("game-input-area").classList.remove("hidden");
     document.getElementById("guess-tbody").innerHTML = "";
     document.getElementById("win-banner").classList.add("hidden");
     document.getElementById("scoreboard-area").classList.add("hidden");
@@ -329,7 +411,7 @@ function addGuessRow(result) {
 
 function guessRow(r, num, extraClass = "") {
     const cls = r.rank <= 100 ? "hot" : r.rank <= 1000 ? "warm" : "cold";
-    const playerCol = gameMode === "cooperative" ? `<td>${r.player}</td>` : "";
+    const playerCol = showPlayerColumn ? `<td>${r.player}</td>` : "";
     return `<tr class="${cls} ${extraClass}"><td>${num}</td>${playerCol}<td>${r.word}</td>
         <td>${r.similarity}%</td><td>第${r.rank}近</td><td>${r.temperature}</td></tr>`;
 }
@@ -363,6 +445,7 @@ function handleMessage(msg) {
     switch (msg.type) {
         case "name_set":
             playerName = msg.name;
+            saveSession();
             document.getElementById("lobby-name").textContent = `👤 ${playerName}`;
             const badge = document.getElementById("user-badge");
             badge.textContent = `👤 ${playerName}`;
@@ -379,39 +462,45 @@ function handleMessage(msg) {
             break;
 
         case "room_joined": {
-            const isRejoin = rejoining;
             rejoining = false;
             currentRoom = msg.room_id;
             gameMode = msg.mode;
+            isSpectator = !!msg.spectator;
+            showPlayerColumn = (msg.mode === "cooperative") || isSpectator;
+            saveSession();
             document.getElementById("win-banner").classList.add("hidden");
             document.getElementById("game-input-area").classList.remove("hidden");
             document.getElementById("game-info").textContent =
                 `房间: ${msg.room_id} | 模式: ${msg.mode === "cooperative" ? "合作" : "竞争"} | 词表: ${msg.total_words}词`;
             document.getElementById("game-players").textContent = `玩家: ${msg.players.join(", ")}`;
-            // Update table header for cooperative mode
+            // Table header: add a 玩家 column when showing everyone's guesses.
             const thead = document.getElementById("guess-thead");
-            if (msg.mode === "cooperative") {
+            if (showPlayerColumn) {
                 thead.innerHTML = "<th>#</th><th>玩家</th><th>词</th><th>相似度</th><th>排名</th><th></th>";
             } else {
                 thead.innerHTML = "<th>#</th><th>词</th><th>相似度</th><th>排名</th><th></th>";
+            }
+            if (msg.mode === "competitive") {
                 document.getElementById("scoreboard-area").classList.remove("hidden");
             }
-            if (msg.mode === "cooperative") {
-                // Coop history is authoritative from the server (covers fresh + rejoin).
-                guessCount = 0; guessHistory = []; latestGuess = null;
-                document.getElementById("guess-tbody").innerHTML = "";
-                (msg.history || []).forEach(r => addGuessRow(r));
-            } else if (isRejoin) {
-                // Competitive rejoin: our guesses live only client-side — keep and re-render.
-                renderGuessTable();
-            } else {
-                // Fresh competitive join: clean slate.
-                guessCount = 0; guessHistory = []; latestGuess = null;
-                document.getElementById("guess-tbody").innerHTML = "";
-                document.getElementById("scoreboard-list").innerHTML = "";
-            }
+            // Server history is authoritative (covers fresh join, reconnect, refresh).
+            guessCount = 0; guessHistory = []; latestGuess = null;
+            document.getElementById("guess-tbody").innerHTML = "";
+            document.getElementById("scoreboard-list").innerHTML = "";
+            (msg.history || []).forEach(r => addGuessRow(r));
             show("screen-game");
-            document.getElementById("input-guess").focus();
+            if (msg.finished) {
+                // Rejoined a finished room: show the result read-only.
+                showFinishedBanner(msg.winner, msg.answer, msg.winner_guesses);
+            } else if (isSpectator) {
+                // Quizmaster host: watch-only, answer revealed, no guessing.
+                const banner = document.getElementById("win-banner");
+                banner.classList.remove("hidden");
+                banner.innerHTML = `<h2>🧑‍⚖️ 出题者观战</h2><p>答案：${msg.answer}</p>`;
+                document.getElementById("game-input-area").classList.add("hidden");
+            } else {
+                document.getElementById("input-guess").focus();
+            }
             break;
         }
 
@@ -447,15 +536,9 @@ function handleMessage(msg) {
             break;
 
 
-        case "game_won": {
-            const banner = document.getElementById("win-banner");
-            banner.classList.remove("hidden");
-            banner.innerHTML = `<h2>🎉 ${msg.winner} 猜对了！</h2>
-                <p>答案: ${msg.word} | 用了 ${msg.guesses} 次</p>
-                <button onclick="leaveRoom()" style="margin-top:12px">返回大厅</button>`;
-            document.getElementById("game-input-area").classList.add("hidden");
+        case "game_won":
+            showFinishedBanner(msg.winner, msg.word, msg.guesses);
             break;
-        }
 
         case "player_joined":
             document.getElementById("game-players").textContent = `玩家: ${msg.players.join(", ")}`;
@@ -475,13 +558,33 @@ function handleMessage(msg) {
             if (rejoining) {
                 rejoining = false;
                 currentRoom = null;
+                clearSessionRoom();
                 showLobby();
             }
             break;
     }
 }
 
-// Init
+// Init — determine the nickname from (1) a /{name} deep link, else (2) a recent saved
+// session. onopen then sends set_name{reclaim}; name_set routes to the lobby or auto-rejoins
+// currentRoom. Falls back to the name screen if neither is present.
+const RESERVED_PATHS = new Set(["admin", "api", "ws", "static", "favicon.ico"]);
+let urlName = "";
+try {
+    urlName = decodeURIComponent(location.pathname.slice(1)).trim();
+} catch (e) { urlName = ""; }
+if (urlName.includes("/") || RESERVED_PATHS.has(urlName.toLowerCase())) urlName = "";
+
+const saved = loadSession();
+if (urlName) {
+    // URL name wins; only reuse a saved room if it belongs to this same name.
+    playerName = urlName;
+    currentRoom = (saved && saved.name && saved.name.toLowerCase() === urlName.toLowerCase())
+        ? (saved.room || null) : null;
+} else if (saved) {
+    playerName = saved.name;
+    currentRoom = saved.room || null;
+}
 connect();
 </script>
 </body>
