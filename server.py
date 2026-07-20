@@ -22,6 +22,7 @@ from config import (
     ROOM_ID_LENGTH, MAX_NAME_LENGTH, MAX_ROOMS,
     HINT_INTERVAL, HINT_CAP_DELTA, MIN_HINT_RANK,
     STATS_DB_PATH, REVEAL_TOP_N,
+    CHAT_HISTORY, MAX_CHAT_LEN,
 )
 from engine import GameEngine, to_simplified
 from words import CANDIDATE_WORDS
@@ -62,6 +63,7 @@ class Room:
     shared_guesses: list = field(default_factory=list)
     winner: str | None = None
     created_at: float = field(default_factory=time.time)
+    chat: list = field(default_factory=list)  # recent chat messages {player, text, ts}
     # Hint tracking. Milestone = how many HINT_INTERVAL blocks have been consumed.
     hint_used_milestone: dict[str, int] = field(default_factory=dict)  # competitive, per player
     coop_hint_used_milestone: int = 0  # cooperative, shared
@@ -335,6 +337,7 @@ async def websocket_endpoint(ws: WebSocket):
                     "is_host": True,
                     "custom": room.custom,
                     "spectator": spectator,
+                    "chat": room.chat,
                 }
                 if spectator:
                     payload["answer"] = room.secret  # host set it, so reveal to them
@@ -378,6 +381,7 @@ async def websocket_endpoint(ws: WebSocket):
                     "finished": room.winner is not None,
                     "custom": room.custom,
                     "spectator": spectator,
+                    "chat": room.chat,
                 }
                 if room.winner is not None or spectator:
                     payload["answer"] = room.secret
@@ -550,6 +554,18 @@ async def websocket_endpoint(ws: WebSocket):
                 else:
                     await ws.send_json(hint)
                     await ws.send_json(hint_status_msg(room, player_name))
+
+            elif msg_type == "chat":
+                if not current_room or not player_name:
+                    continue
+                text = data.get("text", "").strip()[:MAX_CHAT_LEN]
+                if not text:
+                    continue
+                room = current_room
+                message = {"type": "chat", "player": player_name, "text": text, "ts": time.time()}
+                room.chat.append(message)
+                del room.chat[:-CHAT_HISTORY]  # keep only the most recent
+                await broadcast(room, message)
 
             elif msg_type == "leave_room":
                 if current_room and player_name:

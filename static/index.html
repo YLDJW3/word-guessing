@@ -121,6 +121,29 @@ button:disabled { background: #555; cursor: not-allowed; }
     border-radius: 20px; font-size: 0.9rem; font-weight: 600;
     border: 1px solid #e94560;
 }
+/* Top nav row (in-room game/chat switch) — sticks to the top while scrolling */
+#room-nav {
+    position: sticky; top: 0; z-index: 900;
+    display: flex; background: #1a1a2e; border-bottom: 1px solid #2a2a4a;
+    margin-bottom: 12px;
+}
+#room-nav button {
+    flex: 1; background: none; border: none; color: #aaa;
+    padding: 12px 0; font-size: 1rem; font-weight: 600; border-radius: 0;
+    position: relative;
+}
+#room-nav button.active { color: #fff; box-shadow: inset 0 -3px 0 #e94560; }
+.unread-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: #e94560; margin-left: 6px; vertical-align: middle;
+}
+/* Chat */
+.chat-messages {
+    height: 55vh; overflow-y: auto; display: flex; flex-direction: column;
+    gap: 6px; padding: 8px 4px; margin-bottom: 12px;
+}
+.chat-msg { font-size: 0.95rem; line-height: 1.4; word-break: break-word; }
+.chat-msg .who { color: #e94560; font-weight: 600; margin-right: 6px; }
 </style>
 </head>
 <body>
@@ -129,6 +152,12 @@ button:disabled { background: #555; cursor: not-allowed; }
 
 <div class="container">
 <h1>🎯 Semantle</h1>
+
+<!-- Top nav (visible only inside a room) -->
+<div id="room-nav" class="hidden">
+    <button id="nav-game" onclick="showGame()">🎮 游戏</button>
+    <button id="nav-chat" onclick="showChat()">💬 聊天<span id="chat-dot" class="unread-dot hidden"></span></button>
+</div>
 
 <!-- Screen: Set Name -->
 <div id="screen-name" class="card">
@@ -222,6 +251,16 @@ button:disabled { background: #555; cursor: not-allowed; }
     </div>
 </div>
 
+<!-- Screen: Chat -->
+<div id="screen-chat" class="card hidden">
+    <h2 style="margin-bottom:12px">💬 房间聊天</h2>
+    <div id="chat-messages" class="chat-messages"></div>
+    <div class="row">
+        <input id="input-chat" type="text" placeholder="说点什么..." maxlength="300" style="margin-bottom:0">
+        <button onclick="sendChat()" style="flex:none;width:80px">发送</button>
+    </div>
+</div>
+
 </div>
 
 <script>
@@ -236,6 +275,9 @@ let pendingRejoin = null;  // room to auto-rejoin after a reconnect
 let rejoining = false;     // true while a reconnect rejoin is in flight
 let isSpectator = false;   // quizmaster host in a custom competitive room
 let showPlayerColumn = false;  // show a 玩家 column (cooperative feed or spectator view)
+let chatMessages = [];     // per-room chat history
+let chatUnread = 0;        // unread chat messages while on the game tab
+let activeTab = "game";    // "game" | "chat"
 
 // --- Session persistence (survives page refresh) ---
 const SESSION_KEY = "wg_session";
@@ -289,6 +331,12 @@ function send(data) {
 function show(id) {
     document.querySelectorAll(".card").forEach(el => el.classList.add("hidden"));
     document.getElementById(id).classList.remove("hidden");
+    // The nav is only relevant inside a room (game/chat screens). Hide the floating
+    // name badge there so it doesn't overlap the sticky top nav.
+    const inRoom = (id === "screen-game" || id === "screen-chat");
+    document.getElementById("room-nav").classList.toggle("hidden", !inRoom);
+    const badge = document.getElementById("user-badge");
+    badge.classList.toggle("hidden", inRoom || !playerName);
 }
 
 function showToast(msg) {
@@ -312,6 +360,45 @@ document.getElementById("input-name").addEventListener("keydown", (e) => {
 // --- Lobby ---
 function showLobby() { show("screen-lobby"); refreshRooms(); }
 function showCreate() { show("screen-create"); }
+
+// --- In-room tabs: game / chat ---
+function setNavActive() {
+    document.getElementById("nav-game").classList.toggle("active", activeTab === "game");
+    document.getElementById("nav-chat").classList.toggle("active", activeTab === "chat");
+}
+function showGame() {
+    activeTab = "game";
+    show("screen-game");
+    setNavActive();
+}
+function showChat() {
+    activeTab = "chat";
+    chatUnread = 0;
+    document.getElementById("chat-dot").classList.add("hidden");
+    show("screen-chat");
+    setNavActive();
+    renderChat();
+    document.getElementById("input-chat").focus();
+}
+function sendChat() {
+    const input = document.getElementById("input-chat");
+    const text = input.value.trim();
+    if (!text) return;
+    send({type: "chat", text});
+    input.value = "";
+}
+function renderChat() {
+    const box = document.getElementById("chat-messages");
+    box.innerHTML = chatMessages.map(m =>
+        `<div class="chat-msg"><span class="who">${escapeHtml(m.player)}</span>${escapeHtml(m.text)}</div>`).join("");
+    box.scrollTop = box.scrollHeight;
+}
+function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+document.getElementById("input-chat").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.isComposing) sendChat();
+});
 
 // --- Leaderboard (public: player win/loss rankings) ---
 function showLeaderboard() {
@@ -411,6 +498,11 @@ function leaveRoom() {
     latestGuess = null;
     isSpectator = false;
     showPlayerColumn = false;
+    chatMessages = [];
+    chatUnread = 0;
+    activeTab = "game";
+    document.getElementById("chat-dot").classList.add("hidden");
+    document.getElementById("chat-messages").innerHTML = "";
     document.getElementById("game-input-area").classList.remove("hidden");
     document.getElementById("guess-tbody").innerHTML = "";
     document.getElementById("win-banner").classList.add("hidden");
@@ -526,7 +618,12 @@ function handleMessage(msg) {
             document.getElementById("guess-tbody").innerHTML = "";
             document.getElementById("scoreboard-list").innerHTML = "";
             (msg.history || []).forEach(r => addGuessRow(r));
-            show("screen-game");
+            // Chat history for the room.
+            chatMessages = msg.chat || [];
+            chatUnread = 0;
+            document.getElementById("chat-dot").classList.add("hidden");
+            renderChat();
+            showGame();
             if (msg.finished) {
                 // Rejoined a finished room: show the result read-only + reveal.
                 showFinishedBanner(msg.winner, msg.answer, msg.winner_guesses);
@@ -549,6 +646,16 @@ function handleMessage(msg) {
 
         case "scoreboard":
             updateScoreboard(msg.scoreboard);
+            break;
+
+        case "chat":
+            chatMessages.push(msg);
+            if (activeTab === "chat") {
+                renderChat();
+            } else {
+                chatUnread++;
+                document.getElementById("chat-dot").classList.remove("hidden");
+            }
             break;
 
         case "hint_status":

@@ -24,6 +24,10 @@ MAX_ROOMS = 10  # keep this many recent rooms as rejoinable history; evict oldes
 # --- Post-game reveal ---
 REVEAL_TOP_N = 10  # how many of the closest words to the answer to reveal when a game ends
 
+# --- Chat ---
+CHAT_HISTORY = 100  # messages kept per room
+MAX_CHAT_LEN = 300  # max characters per chat message
+
 # --- Hints ---
 HINT_INTERVAL = 100    # one hint earned per this many guesses
 HINT_CAP_DELTA = 0.05  # hint word similarity must be <= best + this (cosine points)
