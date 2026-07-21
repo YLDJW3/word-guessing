@@ -200,9 +200,24 @@ app = FastAPI(title="中文猜词游戏")
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
+def html(name: str) -> FileResponse:
+    # no-cache: browsers must revalidate, so HTML edits show up without a manual cache clear.
+    return FileResponse(os.path.join(STATIC_DIR, name), headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/")
 async def index():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    return html("index.html")
+
+
+@app.get("/word")
+async def word_game():
+    return html("index.html")
+
+
+@app.get("/sudoku")
+async def sudoku():
+    return html("sudoku.html")
 
 
 @app.get("/api/rooms")
@@ -225,7 +240,7 @@ async def list_rooms():
 async def admin_page(key: str = ""):
     if not check_admin(key):
         raise HTTPException(status_code=403, detail="Forbidden")
-    return FileResponse(os.path.join(STATIC_DIR, "admin.html"))
+    return html("admin.html")
 
 
 @app.get("/api/stats/players")
@@ -250,7 +265,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # without a :path converter matches only a single segment, so /api/stats/* etc. never hit it.
 @app.get("/{name}")
 async def named_entry(name: str):
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    return html("index.html")
 
 
 # ---------------------------------------------------------------------------

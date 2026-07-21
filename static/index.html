@@ -116,11 +116,20 @@ button:disabled { background: #555; cursor: not-allowed; }
     background: #0f3460; margin-left: 8px;
 }
 .user-badge {
-    position: fixed; top: 16px; right: 16px; z-index: 1000;
+    position: fixed; top: 56px; right: 16px; z-index: 1000;
     background: #0f3460; color: #eee; padding: 6px 14px;
     border-radius: 20px; font-size: 0.9rem; font-weight: 600;
     border: 1px solid #e94560;
 }
+/* Site-level nav: switch between games */
+.site-nav {
+    display: flex; margin-bottom: 16px; border-bottom: 1px solid #2a2a4a;
+}
+.site-nav a {
+    flex: 1; text-align: center; padding: 12px 0; color: #aaa;
+    font-weight: 700; font-size: 1.1rem; text-decoration: none;
+}
+.site-nav a.active { color: #fff; box-shadow: inset 0 -3px 0 #e94560; }
 /* Top nav row (in-room game/chat switch) — sticks to the top while scrolling */
 #room-nav {
     position: sticky; top: 0; z-index: 900;
@@ -151,7 +160,10 @@ button:disabled { background: #555; cursor: not-allowed; }
 <div id="user-badge" class="user-badge hidden"></div>
 
 <div class="container">
-<h1>🎯 Semantle</h1>
+<nav class="site-nav">
+    <a href="/" class="active">🎯 Semantle</a>
+    <a href="/sudoku">🧩 数独</a>
+</nav>
 
 <!-- Top nav (visible only inside a room) -->
 <div id="room-nav" class="hidden">
@@ -727,7 +739,7 @@ function handleMessage(msg) {
 // Init — determine the nickname from (1) a /{name} deep link, else (2) a recent saved
 // session. onopen then sends set_name{reclaim}; name_set routes to the lobby or auto-rejoins
 // currentRoom. Falls back to the name screen if neither is present.
-const RESERVED_PATHS = new Set(["admin", "api", "ws", "static", "favicon.ico"]);
+const RESERVED_PATHS = new Set(["admin", "api", "ws", "static", "favicon.ico", "word", "sudoku"]);
 let urlName = "";
 try {
     urlName = decodeURIComponent(location.pathname.slice(1)).trim();

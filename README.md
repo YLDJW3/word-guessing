@@ -56,7 +56,10 @@ python server.py
 python server.py --vectors data/sgns.merge.word --limit 500000 --port 8000
 ```
 
-Then open `http://<your-ip>:8000` in a browser. Share the URL with friends to play together.
+Then open `http://<your-ip>:8000` in a browser — it opens the word game (Semantle) by
+default, with a top nav bar to switch between 🎯 Semantle and 🧩 数独 (Sudoku at `/sudoku`).
+Share the URL with friends to play together. (A per-player nickname deep-link like `/alice`
+still enters the word game directly with that name.)
 
 ### Restrict who can join (name allowlist)
 
@@ -140,6 +143,22 @@ python server.py --host 0.0.0.0 --port 8000
 cloudflared tunnel --url http://localhost:8000
 ```
 
+## Sudoku (bonus single-player game)
+
+A standalone 9×9 Sudoku is served at **`/sudoku`** (reachable from the entry page and the
+word-game lobby; links back to 🏠 首页 / 🎯 猜词). It's fully client-side — no server state.
+
+- **Difficulty:** 入门 / 中级 / 困难 / 专家 / 大师 (intro/middle/hard/expert/master), graded by the
+  hardest human technique required (singles → pointing/pairs → hidden pairs → X-Wing →
+  XY-Wing/XYZ-Wing/Swordfish) plus a givens floor. **Master** puzzles are filtered to actually
+  require one of the advanced techniques.
+- **Hint (💡):** fills one logically-deducible digit and explains *why* in plain language
+  (naming the cell, digit, technique, and unit). Guards against a contradictory board.
+- **Check (🔍):** flags wrong entries on demand. Also has pencil notes (✏️), erase, timer,
+  keyboard support, and `localStorage` autosave so a refresh resumes the puzzle.
+- Every generated puzzle has a unique solution. Logic lives in `static/sudoku-core.js`
+  (browser + Node), UI in `static/sudoku.html`.
+
 ## How it works
 
 1. Loads pre-trained word vectors (word2vec text format) once at startup.
@@ -177,8 +196,12 @@ engine.py            # Shared game logic (validate, rank, score)
 stats.py             # SQLite persistence for game statistics
 config.py            # Central config (defaults, hint tuning, thresholds)
 words.py             # Curated candidate secret words (~200)
-static/index.html    # Player web frontend (vanilla HTML/JS, no build step)
+static/index.html    # Word game frontend (default, served at / and /{name})
 static/admin.html    # Admin stats page (token-gated)
+static/sudoku.html   # Sudoku game UI (served at /sudoku)
+static/sudoku-core.js# Sudoku generator/solver/hint logic (browser + Node)
 download_vectors.sh  # Download vectors from Google Drive
 requirements.txt     # Python dependencies
 ```
+
+The Sudoku design spec lives in `spec/sudoku.md`.
