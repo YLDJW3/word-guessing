@@ -84,7 +84,8 @@ button.toggled { background: var(--accent); color: var(--on-accent); }
 /* Number pad */
 #pad { display: grid; grid-template-columns: repeat(9, 1fr); gap: 6px; margin: 14px 0; }
 #pad button { padding: 12px 0; font-size: 1.2rem; }
-.actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+#pad button.done { opacity: 0.4; color: var(--faint); }
+.actions { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
 
 #hint-panel {
     margin-top: 14px; background: var(--card); border-radius: 10px; padding: 14px;
@@ -151,6 +152,7 @@ addEventListener("DOMContentLoaded", applyThemeIcon);
 
     <div class="actions">
         <button id="btn-notes" onclick="toggleNotes()">✏️ 笔记</button>
+        <button onclick="clearAllNotes()">🧹 清笔记</button>
         <button onclick="eraseCell()">⌫ 擦除</button>
         <button onclick="checkBoard()">🔍 检查</button>
         <button onclick="getHint()">💡 提示</button>
@@ -211,6 +213,15 @@ function render() {
             if (selVal !== 0 && v === selVal) el.classList.add("same");
         }
     }
+    updatePad();
+}
+
+// Gray out a digit's pad button once all 9 of it are placed on the board.
+function updatePad() {
+    const counts = new Array(10).fill(0);
+    for (let i = 0; i < 81; i++) counts[state.values[i]]++;
+    const pad = document.getElementById("pad").children;
+    for (let d = 1; d <= 9; d++) pad[d - 1].classList.toggle("done", counts[d] >= 9);
 }
 
 function selectCell(i) { selected = i; render(); }
@@ -256,6 +267,10 @@ function registerMistake(cell, msg) {
 function eraseCell() {
     if (selected < 0 || state.given[selected]) return;
     state.values[selected] = 0; state.notes[selected] = [];
+    save(); render();
+}
+function clearAllNotes() {
+    for (let i = 0; i < 81; i++) state.notes[i] = [];
     save(); render();
 }
 function toggleNotes() {
