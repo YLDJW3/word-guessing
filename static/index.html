@@ -5,21 +5,47 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Semantle</title>
 <style>
+:root {
+    --bg: #1a1a2e;        --text: #eee;
+    --card: #16213e;      --surface: #0f3460;      --surface-hover: #1a4a7a;
+    --accent: #e94560;    --accent-hover: #c73e54;
+    --border: #2a2a4a;    --border-input: #333;
+    --muted: #aaa;        --muted-2: #888;         --faint: #666;
+    --hot: #ff6b6b;       --warm: #ffa502;         --cold: #74b9ff;
+    --purple: #533483;    --disabled: #555;        --on-accent: #fff;
+}
+:root[data-theme="light"] {
+    --bg: #f4f5fb;        --text: #1a1f2e;
+    --card: #ffffff;      --surface: #e7edf7;      --surface-hover: #d5e0f2;
+    --accent: #e94560;    --accent-hover: #c73e54;
+    --border: #d7deec;    --border-input: #c3ccdd;
+    --muted: #5a6478;     --muted-2: #7b8496;      --faint: #9aa2b4;
+    --hot: #e0405a;       --warm: #c47f00;         --cold: #2f7fd6;
+    --purple: #6b4aa8;    --disabled: #bcc4d4;     --on-accent: #fff;
+}
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #1a1a2e;
-    color: #eee;
+    background: var(--bg);
+    color: var(--text);
     min-height: 100vh;
     display: flex;
     flex-direction: column;
     align-items: center;
     padding: 20px;
+    transition: background 0.2s, color 0.2s;
+}
+#theme-toggle {
+    position: fixed; top: 12px; right: 12px; z-index: 1100;
+    width: 40px; height: 40px; padding: 0; border-radius: 50%;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); font-size: 1.1rem; cursor: pointer;
+    line-height: 1; display: flex; align-items: center; justify-content: center;
 }
 h1 { font-size: 1.8rem; margin-bottom: 20px; text-align: center; }
 .container { width: 100%; max-width: 600px; }
 .card {
-    background: #16213e;
+    background: var(--card);
     border-radius: 12px;
     padding: 24px;
     margin-bottom: 16px;
@@ -29,33 +55,33 @@ input, select, button {
     font-size: 1rem;
     padding: 10px 16px;
     border-radius: 8px;
-    border: 1px solid #333;
+    border: 1px solid var(--border-input);
     outline: none;
 }
 input, select {
-    background: #0f3460;
-    color: #eee;
+    background: var(--surface);
+    color: var(--text);
     width: 100%;
     margin-bottom: 12px;
 }
-input:focus { border-color: #e94560; }
+input:focus { border-color: var(--accent); }
 button {
-    background: #e94560;
-    color: #fff;
+    background: var(--accent);
+    color: var(--on-accent);
     border: none;
     cursor: pointer;
     font-weight: 600;
     transition: background 0.2s;
 }
-button:hover { background: #c73e54; }
-button:disabled { background: #555; cursor: not-allowed; }
-.btn-secondary { background: #0f3460; }
-.btn-secondary:hover { background: #1a4a7a; }
+button:hover { background: var(--accent-hover); }
+button:disabled { background: var(--disabled); cursor: not-allowed; }
+.btn-secondary { background: var(--surface); color: var(--text); }
+.btn-secondary:hover { background: var(--surface-hover); }
 .row { display: flex; gap: 10px; margin-bottom: 12px; }
 .row > * { flex: 1; }
 .hidden { display: none !important; }
-.players-list { font-size: 0.9rem; color: #aaa; margin-bottom: 8px; }
-.room-info { font-size: 0.85rem; color: #888; margin-bottom: 16px; }
+.players-list { font-size: 0.9rem; color: var(--muted); margin-bottom: 8px; }
+.room-info { font-size: 0.85rem; color: var(--muted-2); margin-bottom: 16px; }
 .guess-table {
     width: 100%;
     border-collapse: collapse;
@@ -65,86 +91,86 @@ button:disabled { background: #555; cursor: not-allowed; }
 .guess-table th, .guess-table td {
     padding: 6px 8px;
     text-align: left;
-    border-bottom: 1px solid #2a2a4a;
+    border-bottom: 1px solid var(--border);
 }
-.guess-table th { color: #888; font-weight: 500; }
-.guess-table tr.hot { color: #ff6b6b; }
-.guess-table tr.warm { color: #ffa502; }
-.guess-table tr.cold { color: #74b9ff; }
+.guess-table th { color: var(--muted-2); font-weight: 500; }
+.guess-table tr.hot { color: var(--hot); }
+.guess-table tr.warm { color: var(--warm); }
+.guess-table tr.cold { color: var(--cold); }
 .guess-table tr.latest {
-    background: #2a2a4a;
+    background: var(--border);
     font-weight: 700;
-    border-bottom: 2px solid #e94560;
+    border-bottom: 2px solid var(--accent);
 }
 .simcell { position: relative; min-width: 64px; }
-.simbar { position: absolute; left: 0; bottom: -3px; height: 3px; border-radius: 2px; opacity: .75; background: #74b9ff; }
-.guess-table tr.hot .simbar { background: #ff6b6b; }
-.guess-table tr.warm .simbar { background: #ffa502; }
-.guess-table tr.cold .simbar { background: #74b9ff; }
-.closest-note { font-size: 0.9rem; color: #ffa502; margin-bottom: 8px; }
+.simbar { position: absolute; left: 0; bottom: -3px; height: 3px; border-radius: 2px; opacity: .75; background: var(--cold); }
+.guess-table tr.hot .simbar { background: var(--hot); }
+.guess-table tr.warm .simbar { background: var(--warm); }
+.guess-table tr.cold .simbar { background: var(--cold); }
+.closest-note { font-size: 0.9rem; color: var(--warm); margin-bottom: 8px; }
 .reveal-area { margin-top: 16px; }
-.reveal-area h3 { font-size: 1rem; margin-bottom: 8px; color: #aaa; }
-.reveal-word { display: inline-block; background: #0f3460; border-radius: 6px;
+.reveal-area h3 { font-size: 1rem; margin-bottom: 8px; color: var(--muted); }
+.reveal-word { display: inline-block; background: var(--surface); border-radius: 6px;
     padding: 3px 8px; margin: 3px; font-size: 0.85rem; }
 .scoreboard { margin-top: 16px; }
-.scoreboard h3 { font-size: 1rem; margin-bottom: 8px; color: #aaa; }
+.scoreboard h3 { font-size: 1rem; margin-bottom: 8px; color: var(--muted); }
 .score-item {
     display: flex; justify-content: space-between;
     padding: 4px 0; font-size: 0.9rem;
-    border-bottom: 1px solid #2a2a4a;
+    border-bottom: 1px solid var(--border);
 }
 .toast {
     position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-    background: #e94560; color: #fff; padding: 12px 24px;
+    background: var(--accent); color: var(--on-accent); padding: 12px 24px;
     border-radius: 8px; font-weight: 600; z-index: 1000;
     animation: fadeIn 0.3s;
 }
 @keyframes fadeIn { from { opacity: 0; transform: translateX(-50%) translateY(-10px); } }
 .win-banner {
     text-align: center; padding: 20px;
-    background: linear-gradient(135deg, #e94560, #533483);
+    background: linear-gradient(135deg, var(--accent), var(--purple));
     border-radius: 12px; margin-bottom: 16px;
 }
 .win-banner h2 { font-size: 1.5rem; margin-bottom: 8px; }
 .room-list-item {
     display: flex; justify-content: space-between; align-items: center;
-    padding: 10px; border-bottom: 1px solid #2a2a4a;
+    padding: 10px; border-bottom: 1px solid var(--border);
 }
 .room-list-item button { padding: 6px 14px; font-size: 0.85rem; }
 .mode-tag {
     font-size: 0.75rem; padding: 2px 8px; border-radius: 4px;
-    background: #0f3460; margin-left: 8px;
+    background: var(--surface); margin-left: 8px;
 }
 .user-badge {
     position: fixed; top: 56px; right: 16px; z-index: 1000;
-    background: #0f3460; color: #eee; padding: 6px 14px;
+    background: var(--surface); color: var(--text); padding: 6px 14px;
     border-radius: 20px; font-size: 0.9rem; font-weight: 600;
-    border: 1px solid #e94560;
+    border: 1px solid var(--accent);
 }
 /* Site-level nav: switch between games */
 .site-nav {
-    display: flex; margin-bottom: 16px; border-bottom: 1px solid #2a2a4a;
+    display: flex; margin-bottom: 16px; border-bottom: 1px solid var(--border);
 }
 .site-nav a {
-    flex: 1; text-align: center; padding: 12px 0; color: #aaa;
+    flex: 1; text-align: center; padding: 12px 0; color: var(--muted);
     font-weight: 700; font-size: 1.1rem; text-decoration: none;
 }
-.site-nav a.active { color: #fff; box-shadow: inset 0 -3px 0 #e94560; }
+.site-nav a.active { color: var(--text); box-shadow: inset 0 -3px 0 var(--accent); }
 /* Top nav row (in-room game/chat switch) — sticks to the top while scrolling */
 #room-nav {
     position: sticky; top: 0; z-index: 900;
-    display: flex; background: #1a1a2e; border-bottom: 1px solid #2a2a4a;
+    display: flex; background: var(--bg); border-bottom: 1px solid var(--border);
     margin-bottom: 12px;
 }
 #room-nav button {
-    flex: 1; background: none; border: none; color: #aaa;
+    flex: 1; background: none; border: none; color: var(--muted);
     padding: 12px 0; font-size: 1rem; font-weight: 600; border-radius: 0;
     position: relative;
 }
-#room-nav button.active { color: #fff; box-shadow: inset 0 -3px 0 #e94560; }
+#room-nav button.active { color: var(--text); box-shadow: inset 0 -3px 0 var(--accent); }
 .unread-dot {
     display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-    background: #e94560; margin-left: 6px; vertical-align: middle;
+    background: var(--accent); margin-left: 6px; vertical-align: middle;
 }
 /* Chat */
 .chat-messages {
@@ -152,11 +178,35 @@ button:disabled { background: #555; cursor: not-allowed; }
     gap: 6px; padding: 8px 4px; margin-bottom: 12px;
 }
 .chat-msg { font-size: 0.95rem; line-height: 1.4; word-break: break-word; }
-.chat-msg .who { color: #e94560; font-weight: 600; margin-right: 6px; }
+.chat-msg .who { color: var(--accent); font-weight: 600; margin-right: 6px; }
 </style>
+<script>
+// Theme: set data-theme before paint to avoid a flash of the wrong theme.
+const THEME_KEY = "wg_theme";
+(function initTheme() {
+    let t;
+    try { t = localStorage.getItem(THEME_KEY); } catch (e) {}
+    if (!t) t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", t);
+})();
+function applyThemeIcon() {
+    const dark = document.documentElement.getAttribute("data-theme") !== "light";
+    const btn = document.getElementById("theme-toggle");
+    if (btn) btn.textContent = dark ? "☀️" : "🌙";  // icon shows the theme you'd switch TO
+}
+function toggleTheme() {
+    const cur = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+    const next = cur === "light" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+    applyThemeIcon();
+}
+addEventListener("DOMContentLoaded", applyThemeIcon);
+</script>
 </head>
 <body>
 
+<button id="theme-toggle" onclick="toggleTheme()" aria-label="切换主题" title="切换主题"></button>
 <div id="user-badge" class="user-badge hidden"></div>
 
 <div class="container">
@@ -216,12 +266,12 @@ button:disabled { background: #555; cursor: not-allowed; }
 <!-- Screen: Create Room -->
 <div id="screen-create" class="card hidden">
     <h2 style="margin-bottom:16px">创建房间</h2>
-    <label style="font-size:0.9rem;color:#aaa">游戏模式</label>
+    <label style="font-size:0.9rem;color:var(--muted)">游戏模式</label>
     <select id="select-mode">
         <option value="competitive">竞争模式 (各猜各的，比谁快)</option>
         <option value="cooperative">合作模式 (共享猜测，一起猜)</option>
     </select>
-    <label style="font-size:0.9rem;color:#aaa">答案 (留空=系统随机)</label>
+    <label style="font-size:0.9rem;color:var(--muted)">答案 (留空=系统随机)</label>
     <input id="input-secret" type="text" placeholder="自定义答案词 (可选)">
     <div class="row">
         <button onclick="createRoom()">创建</button>
@@ -416,10 +466,10 @@ document.getElementById("input-chat").addEventListener("keydown", (e) => {
 function showLeaderboard() {
     show("screen-leaderboard");
     const tbody = document.getElementById("lb-players");
-    tbody.innerHTML = '<tr><td colspan="5" style="color:#666">加载中…</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--faint)">加载中…</td></tr>';
     fetch("/api/stats/players").then(r => r.json()).then(players => {
         if (!players.length) {
-            tbody.innerHTML = '<tr><td colspan="5" style="color:#666">暂无数据</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" style="color:var(--faint)">暂无数据</td></tr>';
             return;
         }
         tbody.innerHTML = players.map((p, i) => {
@@ -428,7 +478,7 @@ function showLeaderboard() {
                 <td>${p.wins}</td><td>${rate}%</td></tr>`;
         }).join("");
     }).catch(() => {
-        tbody.innerHTML = '<tr><td colspan="5" style="color:#e94560">加载失败</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="color:var(--accent)">加载失败</td></tr>';
     });
 }
 
@@ -436,7 +486,7 @@ function refreshRooms() {
     fetch("/api/rooms").then(r => r.json()).then(rooms => {
         const list = document.getElementById("room-list");
         if (!rooms.length) {
-            list.innerHTML = '<p style="color:#666;font-size:0.9rem;padding:10px 0">暂无房间</p>';
+            list.innerHTML = '<p style="color:var(--faint);font-size:0.9rem;padding:10px 0">暂无房间</p>';
             return;
         }
         list.innerHTML = rooms.map(r => {

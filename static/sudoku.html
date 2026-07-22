@@ -5,51 +5,79 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>数独 Sudoku</title>
 <style>
+:root {
+    --bg: #1a1a2e;        --text: #eee;
+    --card: #16213e;      --surface: #0f3460;
+    --accent: #e94560;    --border: #2a2a4a;
+    --purple: #533483;    --hot: #ff6b6b;
+    --muted: #aaa;        --faint: #667;
+    --given: #cfd8ff;     --user: #74b9ff;
+    --peer: #1d2748;      --same: #33415e;    --notes: #8899bb;
+    --on-accent: #fff;
+}
+:root[data-theme="light"] {
+    --bg: #f4f5fb;        --text: #1a1f2e;
+    --card: #ffffff;      --surface: #e7edf7;
+    --accent: #e94560;    --border: #d7deec;
+    --purple: #6b4aa8;    --hot: #e0405a;
+    --muted: #5a6478;     --faint: #9aa2b4;
+    --given: #2f3fa0;     --user: #2f7fd6;
+    --peer: #eef2fa;      --same: #d9e2f3;    --notes: #7b8496;
+    --on-accent: #fff;
+}
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #1a1a2e; color: #eee; min-height: 100vh; padding: 16px;
+    background: var(--bg); color: var(--text); min-height: 100vh; padding: 16px;
     display: flex; flex-direction: column; align-items: center;
+    transition: background 0.2s, color 0.2s;
 }
-a { color: #74b9ff; text-decoration: none; }
+#theme-toggle {
+    position: fixed; top: 12px; right: 12px; z-index: 1100;
+    width: 40px; height: 40px; padding: 0; border-radius: 50%;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); font-size: 1.1rem; cursor: pointer;
+    line-height: 1; display: flex; align-items: center; justify-content: center;
+}
+a { color: var(--user); text-decoration: none; }
 h1 { font-size: 1.6rem; margin-bottom: 12px; }
 .container { width: 100%; max-width: 480px; }
-.topbar { display: flex; justify-content: flex-end; align-items: center; margin-bottom: 12px; font-size: 0.9rem; color: #aaa; }
-.site-nav { display: flex; margin-bottom: 16px; border-bottom: 1px solid #2a2a4a; }
-.site-nav a { flex: 1; text-align: center; padding: 12px 0; color: #aaa; font-weight: 700; font-size: 1.1rem; text-decoration: none; }
-.site-nav a.active { color: #fff; box-shadow: inset 0 -3px 0 #e94560; }
+.topbar { display: flex; justify-content: flex-end; align-items: center; margin-bottom: 12px; font-size: 0.9rem; color: var(--muted); }
+.site-nav { display: flex; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+.site-nav a { flex: 1; text-align: center; padding: 12px 0; color: var(--muted); font-weight: 700; font-size: 1.1rem; text-decoration: none; }
+.site-nav a.active { color: var(--text); box-shadow: inset 0 -3px 0 var(--accent); }
 .controls { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 select, button {
     font-size: 0.95rem; padding: 8px 12px; border-radius: 8px; border: none;
-    background: #0f3460; color: #eee; cursor: pointer; font-weight: 600;
+    background: var(--surface); color: var(--text); cursor: pointer; font-weight: 600;
 }
-button.primary { background: #e94560; }
+button.primary { background: var(--accent); color: var(--on-accent); }
 button:active { transform: translateY(1px); }
-button.toggled { background: #e94560; }
+button.toggled { background: var(--accent); color: var(--on-accent); }
 
 /* Grid */
 #grid {
     display: grid; grid-template-columns: repeat(9, 1fr); aspect-ratio: 1;
-    width: 100%; background: #2a2a4a; gap: 1px; border: 3px solid #533483; border-radius: 6px;
+    width: 100%; background: var(--border); gap: 1px; border: 3px solid var(--purple); border-radius: 6px;
     touch-action: manipulation; user-select: none;
 }
 .cell {
-    background: #16213e; display: flex; align-items: center; justify-content: center;
+    background: var(--card); display: flex; align-items: center; justify-content: center;
     font-size: clamp(1.1rem, 6vw, 1.8rem); position: relative; cursor: pointer;
 }
 /* Bold 3x3 separators */
-.cell.br { border-right: 2px solid #533483; }
-.cell.bb { border-bottom: 2px solid #533483; }
-.cell.given { color: #cfd8ff; font-weight: 700; }
-.cell.user { color: #74b9ff; }
-.cell.sel { background: #0f3460; }
-.cell.peer { background: #1d2748; }
-.cell.same { background: #33415e; }
+.cell.br { border-right: 2px solid var(--purple); }
+.cell.bb { border-bottom: 2px solid var(--purple); }
+.cell.given { color: var(--given); font-weight: 700; }
+.cell.user { color: var(--user); }
+.cell.sel { background: var(--surface); }
+.cell.peer { background: var(--peer); }
+.cell.same { background: var(--same); }
 .cell.hintflash { animation: flash 1.2s ease; }
-.cell.bad { color: #ff6b6b !important; }
-@keyframes flash { 0%,100%{ background:#16213e } 30%{ background:#e94560 } }
+.cell.bad { color: var(--hot) !important; }
+@keyframes flash { 0%,100%{ background:var(--card) } 30%{ background:var(--accent) } }
 .notes { display: grid; grid-template-columns: repeat(3,1fr); width: 100%; height: 100%;
-    font-size: clamp(0.5rem, 2.2vw, 0.7rem); color: #8899bb; }
+    font-size: clamp(0.5rem, 2.2vw, 0.7rem); color: var(--notes); }
 .notes span { display: flex; align-items: center; justify-content: center; }
 
 /* Number pad */
@@ -58,18 +86,42 @@ button.toggled { background: #e94560; }
 .actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 
 #hint-panel {
-    margin-top: 14px; background: #16213e; border-radius: 10px; padding: 14px;
-    min-height: 48px; font-size: 0.95rem; line-height: 1.5; border-left: 3px solid #e94560;
+    margin-top: 14px; background: var(--card); border-radius: 10px; padding: 14px;
+    min-height: 48px; font-size: 0.95rem; line-height: 1.5; border-left: 3px solid var(--accent);
 }
-#hint-panel.empty { color: #667; border-left-color: #2a2a4a; }
+#hint-panel.empty { color: var(--faint); border-left-color: var(--border); }
 .win-banner { text-align: center; padding: 18px; margin-top: 14px; border-radius: 12px;
-    background: linear-gradient(135deg, #e94560, #533483); }
+    background: linear-gradient(135deg, var(--accent), var(--purple)); }
 .hidden { display: none !important; }
 .toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
-    background: #e94560; color: #fff; padding: 10px 20px; border-radius: 8px; font-weight: 600; z-index: 100; }
+    background: var(--accent); color: var(--on-accent); padding: 10px 20px; border-radius: 8px; font-weight: 600; z-index: 100; }
 </style>
+<script>
+// Theme: set data-theme before paint to avoid a flash of the wrong theme.
+const THEME_KEY = "wg_theme";
+(function initTheme() {
+    let t;
+    try { t = localStorage.getItem(THEME_KEY); } catch (e) {}
+    if (!t) t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", t);
+})();
+function applyThemeIcon() {
+    const dark = document.documentElement.getAttribute("data-theme") !== "light";
+    const btn = document.getElementById("theme-toggle");
+    if (btn) btn.textContent = dark ? "☀️" : "🌙";  // icon shows the theme you'd switch TO
+}
+function toggleTheme() {
+    const cur = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+    const next = cur === "light" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+    applyThemeIcon();
+}
+addEventListener("DOMContentLoaded", applyThemeIcon);
+</script>
 </head>
 <body>
+<button id="theme-toggle" onclick="toggleTheme()" aria-label="切换主题" title="切换主题"></button>
 <div class="container">
     <nav class="site-nav">
         <a href="/">🎯 Semantle</a>

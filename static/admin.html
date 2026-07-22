@@ -5,26 +5,70 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Semantle — Admin Stats</title>
 <style>
+:root {
+    --bg: #1a1a2e;        --text: #eee;
+    --card: #16213e;      --surface: #0f3460;
+    --accent: #e94560;    --border: #2a2a4a;
+    --muted: #aaa;        --muted-2: #888;    --faint: #666;
+}
+:root[data-theme="light"] {
+    --bg: #f4f5fb;        --text: #1a1f2e;
+    --card: #ffffff;      --surface: #e7edf7;
+    --accent: #e94560;    --border: #d7deec;
+    --muted: #5a6478;     --muted-2: #7b8496; --faint: #9aa2b4;
+}
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #1a1a2e; color: #eee; min-height: 100vh; padding: 20px;
+    background: var(--bg); color: var(--text); min-height: 100vh; padding: 20px;
     display: flex; flex-direction: column; align-items: center;
+    transition: background 0.2s, color 0.2s;
+}
+#theme-toggle {
+    position: fixed; top: 12px; right: 12px; z-index: 1100;
+    width: 40px; height: 40px; padding: 0; border-radius: 50%;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); font-size: 1.1rem; cursor: pointer;
+    line-height: 1; display: flex; align-items: center; justify-content: center;
 }
 h1 { font-size: 1.6rem; margin-bottom: 20px; }
-h2 { font-size: 1.1rem; color: #aaa; margin: 20px 0 8px; }
+h2 { font-size: 1.1rem; color: var(--muted); margin: 20px 0 8px; }
 .container { width: 100%; max-width: 700px; }
-.card { background: #16213e; border-radius: 12px; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+.card { background: var(--card); border-radius: 12px; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
 table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #2a2a4a; }
-th { color: #888; font-weight: 500; }
-.game-item { padding: 10px; border-bottom: 1px solid #2a2a4a; }
-.mode-tag { font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; background: #0f3460; margin-left: 8px; }
-.sub { font-size: 0.85rem; color: #aaa; }
-.err { color: #e94560; text-align: center; padding: 40px; }
+th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+th { color: var(--muted-2); font-weight: 500; }
+.game-item { padding: 10px; border-bottom: 1px solid var(--border); }
+.mode-tag { font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; background: var(--surface); margin-left: 8px; }
+.sub { font-size: 0.85rem; color: var(--muted); }
+.err { color: var(--accent); text-align: center; padding: 40px; }
 </style>
+<script>
+// Theme: set data-theme before paint to avoid a flash of the wrong theme.
+const THEME_KEY = "wg_theme";
+(function initTheme() {
+    let t;
+    try { t = localStorage.getItem(THEME_KEY); } catch (e) {}
+    if (!t) t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", t);
+})();
+function applyThemeIcon() {
+    const dark = document.documentElement.getAttribute("data-theme") !== "light";
+    const btn = document.getElementById("theme-toggle");
+    if (btn) btn.textContent = dark ? "☀️" : "🌙";  // icon shows the theme you'd switch TO
+}
+function toggleTheme() {
+    const cur = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+    const next = cur === "light" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+    applyThemeIcon();
+}
+addEventListener("DOMContentLoaded", applyThemeIcon);
+</script>
 </head>
 <body>
+<button id="theme-toggle" onclick="toggleTheme()" aria-label="切换主题" title="切换主题"></button>
 <div class="container">
 <h1>📊 Semantle 管理统计</h1>
 <div class="card">
@@ -51,7 +95,7 @@ Promise.all([q("/api/stats/players"), q("/api/stats/games?limit=50")])
                 return `<tr><td>${i + 1}</td><td>${p.player}</td><td>${p.played}</td>
                     <td>${p.wins}</td><td>${rate}%</td></tr>`;
             }).join("")
-            : '<tr><td colspan="5" style="color:#666">暂无数据</td></tr>';
+            : '<tr><td colspan="5" style="color:var(--faint)">暂无数据</td></tr>';
 
         const gameRows = games.length
             ? games.map(g => {
@@ -63,7 +107,7 @@ Promise.all([q("/api/stats/players"), q("/api/stats/games?limit=50")])
                         ${g.num_players}人 [${g.players.join(", ")}] · ${when}</div>
                 </div>`;
             }).join("")
-            : '<p style="color:#666">暂无对局</p>';
+            : '<p style="color:var(--faint)">暂无对局</p>';
 
         document.getElementById("content").innerHTML = `
             <h2>玩家排行</h2>
