@@ -7,3 +7,6 @@ data/
 .venv/
 __pycache__/
 *.pyc
+
+# Background process logs / pid files (make server-bg / tunnel-bg)
+logs/

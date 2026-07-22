@@ -22,6 +22,13 @@ make server                        # = uv run server.py --allow-names-file allow
 python server.py --limit 500000 --port 8000 --admin-token mysecret
 make tunnel                        # expose via cloudflared
 
+# Detached long-running variants (survive terminal close; output → logs/*.log, pid → logs/*.pid)
+make server-bg                     # start server in background
+make tunnel-bg                     # start cloudflared tunnel in background
+make status                        # show running / not running for each
+make logs                          # tail -f logs/server.log logs/tunnel.log
+make stop                          # kill both background processes
+
 # Run the single-player CLI
 python game.py --answer 苹果 --limit 200000
 ```
