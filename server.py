@@ -256,8 +256,18 @@ async def stats_games(key: str = "", limit: int = 50):
     return stats.get_recent_games(limit)
 
 
-# Mount static files (CSS, JS if any) after explicit routes
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# Mount static files (CSS, JS if any) after explicit routes.
+# no-cache so JS/CSS edits always take effect: the browser keeps the file but must
+# revalidate (StaticFiles sends an ETag → cheap 304 when unchanged, full body when changed).
+# Without this, StaticFiles sends no Cache-Control and browsers serve a stale sudoku-core.js.
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/static", NoCacheStaticFiles(directory=STATIC_DIR), name="static")
 
 
 # Catch-all deep link: /{name} serves the SPA, which reads the nickname from the path.

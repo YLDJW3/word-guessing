@@ -398,6 +398,36 @@
     return best; // hardest found within the attempt cap
   }
 
+  // --- Strict mode: which cells are logically forced right now? ---
+  // Returns { cellIndex: digit } for EVERY empty cell whose value is currently
+  // determined by pure logic — a naked single, or a hidden single in some unit,
+  // after applying all available candidate eliminations to a fixpoint (no placements).
+  // These are exactly the moves a player may make without guessing.
+  function forcedCells(values) {
+    const state = { values: values.slice(), cand: computeCands(values) };
+    for (let guard = 0; guard < 300; guard++) {
+      let elim = null;
+      for (const t of ELIMERS) { elim = t(state); if (elim) break; }
+      if (!elim) break;
+      applyStep(state, elim);
+    }
+    const forced = {};
+    for (let i = 0; i < 81; i++) {
+      if (state.values[i] === 0 && state.cand[i] && state.cand[i].size === 1) {
+        forced[i] = [...state.cand[i]][0];
+      }
+    }
+    for (let u = 0; u < 27; u++) {
+      const unit = UNITS[u];
+      for (let d = 1; d <= 9; d++) {
+        if (unit.some(i => state.values[i] === d)) continue;
+        const cells = unit.filter(i => state.values[i] === 0 && state.cand[i] && state.cand[i].has(d));
+        if (cells.length === 1) forced[cells[0]] = d;
+      }
+    }
+    return forced;
+  }
+
   // --- Hint: reveal one correct placement + the human reason ---
   // Uses the stored `solution` only for an error guard and a last-resort fallback; the
   // explanation itself comes from logic on the current board.
@@ -435,7 +465,7 @@
   }
 
   const SudokuCore = {
-    generatePuzzle, getHint, solveLogically, countSolutions, computeCands,
+    generatePuzzle, getHint, solveLogically, countSolutions, computeCands, forcedCells,
     UNITS, PEERS, ROWS, COLS, BOXES, rc,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = SudokuCore;

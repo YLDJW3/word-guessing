@@ -42,7 +42,8 @@ body {
 a { color: var(--user); text-decoration: none; }
 h1 { font-size: 1.6rem; margin-bottom: 12px; }
 .container { width: 100%; max-width: 480px; }
-.topbar { display: flex; justify-content: flex-end; align-items: center; margin-bottom: 12px; font-size: 0.9rem; color: var(--muted); }
+.topbar { display: flex; justify-content: flex-end; gap: 16px; align-items: center; margin-bottom: 12px; font-size: 0.9rem; color: var(--muted); }
+#mistake-box { color: var(--hot); font-weight: 600; }
 .site-nav { display: flex; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
 .site-nav a { flex: 1; text-align: center; padding: 12px 0; color: var(--muted); font-weight: 700; font-size: 1.1rem; text-decoration: none; }
 .site-nav a.active { color: var(--text); box-shadow: inset 0 -3px 0 var(--accent); }
@@ -128,6 +129,7 @@ addEventListener("DOMContentLoaded", applyThemeIcon);
         <a href="/sudoku" class="active">🧩 数独</a>
     </nav>
     <div class="topbar">
+        <span id="mistake-box" class="hidden">❌ 错误 <span id="mistakes">0</span></span>
         <span>⏱ <span id="timer">00:00</span></span>
     </div>
 
@@ -140,6 +142,7 @@ addEventListener("DOMContentLoaded", applyThemeIcon);
             <option value="master">大师</option>
         </select>
         <button class="primary" onclick="newGame()">新游戏</button>
+        <button id="btn-strict" onclick="toggleStrict()" title="严格模式（开局设置，中途不可切换）：只能填入能被逻辑推理确定的数字，猜测会记为错误">🧠 严格</button>
     </div>
 
     <div id="grid"></div>
@@ -157,12 +160,13 @@ addEventListener("DOMContentLoaded", applyThemeIcon);
     <div id="win-banner" class="win-banner hidden"></div>
 </div>
 
-<script src="/static/sudoku-core.js"></script>
+<script src="/static/sudoku-core.js?v=2"></script>
 <script>
 const SAVE_KEY = "sudoku_save";
 let state = null;       // {puzzle, solution, values, notes, given, difficulty, elapsed}
 let selected = -1;
 let notesMode = false;
+let strictMode = false;
 let timerId = null;
 
 // ---------- Rendering ----------
@@ -215,14 +219,39 @@ function selectCell(i) { selected = i; render(); }
 function inputDigit(d) {
     if (selected < 0 || state.given[selected]) return;
     if (notesMode && state.values[selected] === 0) {
+        // Pencil marks are never a placement — always allowed, even in strict mode.
         const set = state.notes[selected] || (state.notes[selected] = []);
         const idx = set.indexOf(d);
         if (idx >= 0) set.splice(idx, 1); else set.push(d);
     } else {
-        state.values[selected] = (state.values[selected] === d) ? 0 : d;
+        const clearing = state.values[selected] === d;  // tapping the same digit clears it
+        // Strict mode: a placed digit must be logically forced right now. Clearing is fine.
+        if (state.strict && !clearing) {
+            const [r, c] = SudokuCore.rc(selected);
+            if (d !== state.solution[selected]) {
+                return registerMistake(selected, `R${r + 1}C${c + 1} 填 ${d} 与本局唯一解矛盾 —— 记为一次错误。`);
+            }
+            // Guard against a stale/old sudoku-core.js lacking forcedCells: fail open
+            // (the digit already matches the solution) rather than blocking every placement.
+            const forced = (typeof SudokuCore.forcedCells === "function") ? SudokuCore.forcedCells(state.values) : null;
+            if (forced && forced[selected] !== d) {
+                return registerMistake(selected, `R${r + 1}C${c + 1} 现在还不能确定填 ${d}，这是猜测 —— 记为一次错误。先完成能推理出来的格子。`);
+            }
+        }
+        state.values[selected] = clearing ? 0 : d;
         state.notes[selected] = [];
     }
     save(); render(); checkWin();
+}
+// Strict-mode violation: reject the digit, count + report it, flash the cell red.
+function registerMistake(cell, msg) {
+    state.mistakes = (state.mistakes || 0) + 1;
+    save();
+    updateMistakeDisplay();
+    const el = document.getElementById("grid").children[cell];
+    el.classList.add("bad");
+    setTimeout(() => el.classList.remove("bad"), 1200);
+    showHint("❌ " + msg, false);
 }
 function eraseCell() {
     if (selected < 0 || state.given[selected]) return;
@@ -232,6 +261,23 @@ function eraseCell() {
 function toggleNotes() {
     notesMode = !notesMode;
     document.getElementById("btn-notes").classList.toggle("toggled", notesMode);
+}
+function toggleStrict() {
+    // Strict is a START parameter: it only applies to the next 新游戏, never the
+    // game in progress. Toggling here just records the choice for the next game.
+    strictMode = !strictMode;
+    document.getElementById("btn-strict").classList.toggle("toggled", strictMode);
+    showHint(strictMode
+        ? "🧠 已选择严格模式，将在「新游戏」后生效（不影响当前这一局）。"
+        : "已取消严格模式，将在「新游戏」后生效（不影响当前这一局）。", false);
+}
+function updateMistakeDisplay() {
+    // The counter reflects the CURRENT game's mode; the button reflects the
+    // pending choice for the next game (like the difficulty selector).
+    const on = !!(state && state.strict);
+    document.getElementById("mistake-box").classList.toggle("hidden", !on);
+    document.getElementById("mistakes").textContent = state ? (state.mistakes || 0) : 0;
+    document.getElementById("btn-strict").classList.toggle("toggled", strictMode);
 }
 
 function buildPad() {
@@ -286,7 +332,8 @@ function checkWin() {
     stopTimer();
     const b = document.getElementById("win-banner");
     b.classList.remove("hidden");
-    b.innerHTML = `<h2>🎉 完成！</h2><p>难度：${labelFor(state.difficulty)} · 用时 ${fmt(state.elapsed)}</p>`;
+    const strictNote = state.strict ? ` · 🧠 严格 · 错误 ${state.mistakes || 0} 次` : "";
+    b.innerHTML = `<h2>🎉 完成！</h2><p>难度：${labelFor(state.difficulty)} · 用时 ${fmt(state.elapsed)}${strictNote}</p>`;
     clearSave();
     return true;
 }
@@ -325,12 +372,15 @@ function newGame() {
         given: r.puzzle.map(v => v !== 0),
         notes: Array.from({ length: 81 }, () => []),
         elapsed: 0,
+        strict: strictMode,
+        mistakes: 0,
     };
     selected = -1;
     document.getElementById("win-banner").classList.add("hidden");
     document.getElementById("timer").textContent = "00:00";
     showHint("点击「提示」获取下一步及理由。", false);
     document.getElementById("hint-panel").classList.add("empty");
+    updateMistakeDisplay();
     render();
     startTimer();
 }
@@ -338,9 +388,13 @@ function newGame() {
 function resume(s) {
     state = s;
     if (!state.notes) state.notes = Array.from({ length: 81 }, () => []);
+    state.mistakes = state.mistakes || 0;
+    state.strict = !!state.strict;
+    strictMode = state.strict;
     document.getElementById("difficulty").value = state.difficulty;
     selected = -1;
     document.getElementById("timer").textContent = fmt(state.elapsed);
+    updateMistakeDisplay();
     render();
     if (!checkWin()) startTimer();
 }
@@ -350,6 +404,7 @@ document.addEventListener("keydown", (e) => {
     if (e.key >= "1" && e.key <= "9") inputDigit(+e.key);
     else if (e.key === "Backspace" || e.key === "Delete" || e.key === "0") eraseCell();
     else if (e.key === "n") toggleNotes();
+    else if (e.key === "s") toggleStrict();
     else if (e.key === "h") getHint();
     else if (selected >= 0 && ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
         let [r, c] = [Math.floor(selected / 9), selected % 9];
